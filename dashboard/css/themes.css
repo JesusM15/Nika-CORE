@@ -1,0 +1,273 @@
+/* ═══════════════════════════════════════════════════════════════
+   Nika OS — themes.css
+   Tres temas visuales: Dark (por defecto), Cyberpunk, Matrix.
+   Se aplican cambiando el atributo data-theme en <html>.
+   ═══════════════════════════════════════════════════════════════ */
+
+
+/* ══════════════════════════════════════════════════
+   TEMA: DARK (por defecto — ya definido en main.css)
+   Solo se redefine aquí para claridad y referencia.
+   ══════════════════════════════════════════════════ */
+[data-theme="dark"] {
+  --bg-base:        #07070e;
+  --bg-surface:     #0f0f1a;
+  --bg-elevated:    #16162a;
+  --accent:         #8b5cf6;
+  --accent-dim:     rgba(139, 92, 246, 0.15);
+  --accent-glow:    rgba(139, 92, 246, 0.35);
+  --accent-dark:    #6d28d9;
+  --accent-light:   #a78bfa;
+  --cyan:           #06b6d4;
+  --cyan-dim:       rgba(6, 182, 212, 0.12);
+  --text-primary:   #f0f2f8;
+  --text-secondary: #94a3c0;
+  --text-muted:     #4a5680;
+}
+
+[data-theme="dark"] body {
+  background-image:
+    linear-gradient(rgba(139, 92, 246, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(139, 92, 246, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+
+/* ══════════════════════════════════════════════════
+   TEMA: CYBERPUNK
+   Magenta + amarillo neón sobre fondo casi negro azulado.
+   Inspirado en Cyberpunk 2077 y estéticas neon-noir.
+   ══════════════════════════════════════════════════ */
+[data-theme="cyberpunk"] {
+  --bg-base:        #04000a;    /* Casi negro con tinte púrpura */
+  --bg-surface:     #090012;
+  --bg-elevated:    #110020;
+  --bg-overlay:     rgba(4, 0, 10, 0.92);
+
+  --border-subtle:  rgba(255, 0, 255, 0.06);
+  --border-default: rgba(255, 0, 255, 0.14);
+  --border-strong:  rgba(255, 0, 255, 0.30);
+
+  --text-primary:   #faf0ff;
+  --text-secondary: #c0a8d0;
+  --text-muted:     #5a3870;
+
+  /* Magenta como acento principal */
+  --accent:         #d000ff;
+  --accent-dim:     rgba(208, 0, 255, 0.12);
+  --accent-glow:    rgba(208, 0, 255, 0.40);
+  --accent-dark:    #9900cc;
+  --accent-light:   #e060ff;
+
+  /* Amarillo neón como secundario */
+  --cyan:           #ffe600;
+  --cyan-dim:       rgba(255, 230, 0, 0.10);
+  --cyan-glow:      rgba(255, 230, 0, 0.35);
+
+  --green:          #00ffe7;
+  --green-dim:      rgba(0, 255, 231, 0.10);
+  --green-glow:     rgba(0, 255, 231, 0.30);
+
+  --rose:           #ff1f7e;
+  --rose-dim:       rgba(255, 31, 126, 0.12);
+  --rose-glow:      rgba(255, 31, 126, 0.40);
+
+  --amber:          #ffae00;
+  --amber-dim:      rgba(255, 174, 0, 0.12);
+
+  --shadow-md:   0 4px 20px rgba(208, 0, 255, 0.15), 0 1px 4px rgba(0,0,0,0.5);
+  --shadow-lg:   0 8px 40px rgba(208, 0, 255, 0.20), 0 2px 8px rgba(0,0,0,0.6);
+  --shadow-glow: 0 0 30px var(--accent-glow), 0 0 60px rgba(208, 0, 255, 0.15);
+}
+
+[data-theme="cyberpunk"] body {
+  background-image:
+    /* Rejilla con tono magenta */
+    linear-gradient(rgba(208, 0, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(208, 0, 255, 0.04) 1px, transparent 1px),
+    /* Gradiente diagonal sutil */
+    radial-gradient(ellipse at 20% 20%, rgba(208, 0, 255, 0.06) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 80%, rgba(255, 230, 0, 0.04) 0%, transparent 50%);
+  background-size: 40px 40px, 40px 40px, 100% 100%, 100% 100%;
+}
+
+[data-theme="cyberpunk"] .topbar__name {
+  background: linear-gradient(135deg, #ff1f7e, #d000ff, #ffe600);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+[data-theme="cyberpunk"] .logo-ring {
+  border-color: #d000ff;
+}
+
+[data-theme="cyberpunk"] .logo-letter {
+  color: #e060ff;
+}
+
+/* Cards cyberpunk: borde luminoso magenta */
+[data-theme="cyberpunk"] .card {
+  border-color: rgba(208, 0, 255, 0.08);
+}
+
+[data-theme="cyberpunk"] .card:not(.card--expanded):hover {
+  border-color: rgba(208, 0, 255, 0.25);
+  box-shadow:
+    0 4px 20px rgba(208, 0, 255, 0.20),
+    0 0 1px 1px rgba(208, 0, 255, 0.15) inset;
+}
+
+/* Efectos de scanline (estética CRT) */
+[data-theme="cyberpunk"] body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1000;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.06) 2px,
+    rgba(0, 0, 0, 0.06) 4px
+  );
+}
+
+
+/* ══════════════════════════════════════════════════
+   TEMA: MATRIX
+   Verde terminal sobre negro profundo.
+   Estética hacker/años 90 reinterpretada.
+   ══════════════════════════════════════════════════ */
+[data-theme="matrix"] {
+  --bg-base:        #000300;    /* Negro con tinte verde ultrasuave */
+  --bg-surface:     #000a02;
+  --bg-elevated:    #001205;
+  --bg-overlay:     rgba(0, 3, 0, 0.93);
+
+  --border-subtle:  rgba(0, 255, 65, 0.06);
+  --border-default: rgba(0, 255, 65, 0.14);
+  --border-strong:  rgba(0, 255, 65, 0.30);
+
+  --text-primary:   #c8ffcc;
+  --text-secondary: #4de85a;
+  --text-muted:     #1a6622;
+
+  /* Verde matrix como acento principal */
+  --accent:         #00ff41;
+  --accent-dim:     rgba(0, 255, 65, 0.10);
+  --accent-glow:    rgba(0, 255, 65, 0.40);
+  --accent-dark:    #00cc33;
+  --accent-light:   #39ff5e;
+
+  /* Cyan claro como secundario */
+  --cyan:           #00e5cc;
+  --cyan-dim:       rgba(0, 229, 204, 0.10);
+  --cyan-glow:      rgba(0, 229, 204, 0.35);
+
+  --green:          #00ff41;
+  --green-dim:      rgba(0, 255, 65, 0.10);
+  --green-glow:     rgba(0, 255, 65, 0.40);
+
+  --rose:           #ff4466;
+  --rose-dim:       rgba(255, 68, 102, 0.12);
+  --rose-glow:      rgba(255, 68, 102, 0.40);
+
+  --amber:          #ccff00;
+  --amber-dim:      rgba(204, 255, 0, 0.10);
+
+  --shadow-md:   0 4px 20px rgba(0, 255, 65, 0.12), 0 1px 4px rgba(0,0,0,0.7);
+  --shadow-lg:   0 8px 40px rgba(0, 255, 65, 0.18), 0 2px 8px rgba(0,0,0,0.8);
+  --shadow-glow: 0 0 30px var(--accent-glow);
+}
+
+[data-theme="matrix"] body {
+  background-image:
+    /* Rejilla matrix */
+    linear-gradient(rgba(0, 255, 65, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 255, 65, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Fuente monoespaciada en tema matrix para dar sensación de terminal */
+[data-theme="matrix"] .card__title,
+[data-theme="matrix"] .topbar__name,
+[data-theme="matrix"] .card__subtitle {
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+}
+
+[data-theme="matrix"] .topbar__name {
+  background: linear-gradient(135deg, #00ff41, #00e5cc);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+[data-theme="matrix"] .logo-ring {
+  border-color: #00ff41;
+}
+
+[data-theme="matrix"] .logo-letter {
+  color: #39ff5e;
+}
+
+/* Cards matrix: borde verde */
+[data-theme="matrix"] .card {
+  border-color: rgba(0, 255, 65, 0.08);
+}
+
+[data-theme="matrix"] .card:not(.card--expanded):hover {
+  border-color: rgba(0, 255, 65, 0.25);
+  box-shadow:
+    0 4px 20px rgba(0, 255, 65, 0.15),
+    0 0 1px 1px rgba(0, 255, 65, 0.10) inset;
+}
+
+/* Efecto flicker sutil en botones primarios */
+[data-theme="matrix"] .btn--primary {
+  background: var(--accent-dark);
+  border-color: var(--accent);
+  color: var(--bg-base);
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+[data-theme="matrix"] .btn--primary:hover {
+  background: var(--accent);
+  animation: matrix-flicker 0.15s ease;
+}
+
+@keyframes matrix-flicker {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.85; }
+}
+
+/* Scanlines en tema matrix (más pronunciadas) */
+[data-theme="matrix"] body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 999;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 3px,
+    rgba(0, 255, 65, 0.02) 3px,
+    rgba(0, 255, 65, 0.02) 4px
+  );
+}
+
+/* Cursor de texto parpadeante en matrix */
+[data-theme="matrix"] .console-output::after {
+  content: '█';
+  color: var(--accent);
+  animation: cursor-blink 1s step-end infinite;
+}
+
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}

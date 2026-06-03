@@ -1,0 +1,32 @@
+# ══════════════════════════════════════════════════════
+#  Nika OS — Dependencias de sistema para Raspberry Pi
+#  Este archivo documenta los paquetes apt necesarios.
+#
+#  INSTALACIÓN (ejecutar como root o con sudo):
+#    sudo apt update && sudo apt upgrade -y
+#    sudo apt install -y $(cat requirements_rpi.txt | grep -v '#' | tr '\n' ' ')
+# ══════════════════════════════════════════════════════
+
+# ── Audio (requerido por pyaudio) ─────────────────────
+portaudio19-dev
+python3-dev
+libasound2-dev
+libpulse-dev
+
+# ── TTS: espeak-ng ─────────────────────────────────────
+espeak-ng
+libespeak-ng-dev
+
+# ── MQTT Broker (Mosquitto) ────────────────────────────
+mosquitto
+mosquitto-clients
+
+# ── Python base ────────────────────────────────────────
+python3-pip
+python3-venv
+python3-wheel
+
+# ── Red y utilidades ───────────────────────────────────
+wget
+unzip
+git

@@ -1,0 +1,48 @@
+# ══════════════════════════════════════════════════════
+#  Nika OS — requirements.txt
+#  Instalar con: pip install -r requirements.txt
+#
+#  NOTAS DE INSTALACIÓN:
+#  ┌─────────────────────────────────────────────────────┐
+#  │ Windows (desarrollo):                               │
+#  │   pip install -r requirements.txt                   │
+#  │   pyaudio usa wheels pre-compilados en Windows.     │
+#  │                                                     │
+#  │ Raspberry Pi (producción):                          │
+#  │   Primero instalar dependencias del sistema:        │
+#  │   sudo apt install portaudio19-dev python3-dev      │
+#  │   sudo apt install espeak-ng libespeak-ng-dev       │
+#  │   Luego: pip install -r requirements.txt            │
+#  └─────────────────────────────────────────────────────┘
+# ══════════════════════════════════════════════════════
+
+# ── Backend Web ────────────────────────────────────────
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0       # Servidor ASGI con WebSocket support
+python-multipart>=0.0.9         # Para parsing de formularios
+aiofiles>=23.2.1                # I/O de archivos async para FastAPI
+
+# ── Base de datos ──────────────────────────────────────
+SQLAlchemy>=2.0.0               # ORM async
+aiosqlite>=0.19.0               # Driver SQLite async (para SQLAlchemy async)
+
+# ── MQTT ───────────────────────────────────────────────
+paho-mqtt>=2.0.0                # Cliente MQTT compatible con Mosquitto
+
+# ── Reconocimiento de Voz (STT) ────────────────────────
+# NOTA: vosk requiere un modelo descargado por separado (ver .env.example)
+vosk>=0.3.45
+
+# ── Captura de Audio ───────────────────────────────────
+# Windows: instala con pip directamente (wheels pre-compilados disponibles)
+# RPi:     requiere `sudo apt install portaudio19-dev` antes del pip install
+pyaudio>=0.2.14
+
+# ── Configuración ──────────────────────────────────────
+python-dotenv>=1.0.0            # Carga variables desde .env
+
+# ── HTTP Client (para wake_word → main.py) ─────────────
+requests>=2.31.0                # Llamadas HTTP síncronas desde wake_word.py
+
+# ── Validación de datos ────────────────────────────────
+pydantic>=2.0.0                 # Modelos de datos para FastAPI (incluido con fastapi)

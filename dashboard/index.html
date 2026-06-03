@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Nika OS — Panel de control del asistente inteligente centralizado. Gestiona modos, dispositivos y configuración desde una interfaz tipo SmartTV.">
+  <meta name="theme-color" content="#08080f">
+  <title>Nika OS</title>
+
+  <!--
+    Fuentes: Inter para texto principal, JetBrains Mono para consola.
+    Se preconectan los dominios para reducir latencia.
+  -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/static/main.css">
+  <link rel="stylesheet" href="/static/cards.css">
+  <link rel="stylesheet" href="/static/themes.css">
+</head>
+<body>
+
+  <!-- ══════════════════════════════════════════════════
+       TOPBAR: Marca, estado del sistema y reloj
+  ══════════════════════════════════════════════════ -->
+  <header class="topbar" id="topbar" role="banner">
+
+    <!-- Logo animado + nombre -->
+    <div class="topbar__brand">
+      <div class="topbar__logo" aria-hidden="true">
+        <span class="logo-ring"></span>
+        <span class="logo-ring logo-ring--2"></span>
+        <span class="logo-letter">N</span>
+      </div>
+      <div class="topbar__title-group">
+        <h1 class="topbar__name" id="nika-name-display">Nika</h1>
+        <span class="topbar__tagline">Sistema Inteligente</span>
+      </div>
+    </div>
+
+    <!-- Indicadores de estado del sistema -->
+    <nav class="topbar__status" aria-label="Estado del sistema">
+
+      <!-- Estado MQTT -->
+      <div class="status-pill" id="pill-mqtt" title="Estado del broker MQTT">
+        <span class="status-dot" id="dot-mqtt" data-state="offline" aria-label="MQTT desconectado"></span>
+        <span class="status-pill__label">MQTT</span>
+      </div>
+
+      <!-- Estado de Voz -->
+      <div class="status-pill" id="pill-voice" title="Estado del detector de voz">
+        <span class="status-dot" id="dot-voice" data-state="inactive" aria-label="Voz inactiva"></span>
+        <span class="status-pill__label" id="voice-state-label">Voz</span>
+      </div>
+
+      <!-- Contador de dispositivos online -->
+      <div class="status-pill status-pill--count" id="pill-devices" title="Dispositivos en línea">
+        <span class="status-pill__count" id="device-online-count">0</span>
+        <span class="status-pill__label">Online</span>
+      </div>
+
+    </nav>
+
+    <!-- Reloj digital -->
+    <div class="topbar__clock" aria-live="off">
+      <span class="clock__time" id="clock-time">00:00:00</span>
+      <span class="clock__date" id="clock-date">Martes, 3 Jun</span>
+    </div>
+
+  </header>
+
+  <!-- ══════════════════════════════════════════════════
+       INDICADOR DE VOZ GLOBAL
+       Aparece cuando se detecta keyword o se está grabando
+  ══════════════════════════════════════════════════ -->
+  <div class="voice-overlay" id="voice-overlay" hidden role="status" aria-live="assertive">
+    <div class="voice-rings-wrap" aria-hidden="true">
+      <div class="voice-ring vr-1"></div>
+      <div class="voice-ring vr-2"></div>
+      <div class="voice-ring vr-3"></div>
+      <div class="voice-mic-icon">🎙️</div>
+    </div>
+    <p class="voice-overlay__text" id="voice-overlay-text">Escuchando...</p>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════
+       CONTENEDOR DE TOASTS (notificaciones flotantes)
+  ══════════════════════════════════════════════════ -->
+  <div class="toast-container" id="toast-container" role="region" aria-label="Notificaciones" aria-live="polite"></div>
+
+  <!-- ══════════════════════════════════════════════════
+       DASHBOARD PRINCIPAL — GRID DE CARDS
+  ══════════════════════════════════════════════════ -->
+  <main class="dashboard" id="dashboard" role="main">
+
+    <!-- ╔══════════════════════════════════╗
+         ║   CARD: MODOS                   ║
+         ╚══════════════════════════════════╝ -->
+    <section
+      class="card card--modes"
+      id="card-modes"
+      data-card="modes"
+      tabindex="0"
+      role="button"
+      aria-expanded="false"
+      aria-controls="modes-expanded"
+      aria-label="Panel de Modos">
+
+      <!-- Cabecera siempre visible -->
+      <div class="card__head">
+        <div class="card__icon-badge card__icon-badge--violet">
+          <!-- Icono SVG: lista con reloj -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+            <rect x="9" y="3" width="6" height="4" rx="1"/>
+            <line x1="9" y1="12" x2="15" y2="12"/>
+            <line x1="9" y1="16" x2="12" y2="16"/>
+          </svg>
+        </div>
+        <div class="card__info">
+          <h2 class="card__title">Modos</h2>
+          <p class="card__subtitle"><span id="modes-count">0</span> configurados</p>
+        </div>
+        <div class="card__expand-arrow" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Preview compacto: chips de modos activos -->
+      <div class="card__preview" aria-hidden="true">
+        <div class="chips-row" id="modes-chips-preview">
+          <span class="chip chip--placeholder">Sin modos</span>
+        </div>
+      </div>
+
+      <!-- Contenido expandido (oculto por defecto) -->
+      <div class="card__expanded-body" id="modes-expanded" hidden>
+
+        <!-- Barra de herramientas -->
+        <div class="expanded-toolbar">
+          <button class="btn btn--primary" id="btn-new-mode" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+              <path d="M12 5v14M5 12h14"/>
+            </svg>
+            Nuevo Modo
+          </button>
+          <div class="search-wrap">
+            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+            </svg>
+            <input
+              class="search-input"
+              id="modes-search"
+              type="search"
+              placeholder="Buscar modo..."
+              aria-label="Buscar modo">
+          </div>
+        </div>
+
+        <!-- Grid de cards de modos -->
+        <div class="modes-grid" id="modes-grid" role="list" aria-label="Lista de modos">
+          <p class="empty-state" id="modes-empty">
+            No hay modos configurados. ¡Crea el primero!
+          </p>
+        </div>
+
+      </div>
+    </section>
+
+
+    <!-- ╔══════════════════════════════════╗
+         ║   CARD: DISPOSITIVOS            ║
+         ╚══════════════════════════════════╝ -->
+    <section
+      class="card card--devices"
+      id="card-devices"
+      data-card="devices"
+      tabindex="0"
+      role="button"
+      aria-expanded="false"
+      aria-controls="devices-expanded"
+      aria-label="Panel de Dispositivos">
+
+      <div class="card__head">
+        <div class="card__icon-badge card__icon-badge--cyan">
+          <!-- Icono: monitor + señal -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <rect x="2" y="3" width="20" height="14" rx="2"/>
+            <line x1="8" y1="21" x2="16" y2="21"/>
+            <line x1="12" y1="17" x2="12" y2="21"/>
+            <circle cx="18" cy="7" r="1.5" fill="currentColor" stroke="none"/>
+          </svg>
+        </div>
+        <div class="card__info">
+          <h2 class="card__title">Dispositivos</h2>
+          <p class="card__subtitle"><span id="devices-online-count">0</span> en línea</p>
+        </div>
+        <div class="card__expand-arrow" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Preview: lista compacta de dispositivos -->
+      <div class="card__preview" aria-hidden="true">
+        <div class="device-mini-list" id="device-mini-list">
+          <span class="mini-device-placeholder">Escaneando red...</span>
+        </div>
+      </div>
+
+      <!-- Contenido expandido -->
+      <div class="card__expanded-body" id="devices-expanded" hidden>
+        <div class="expanded-toolbar">
+          <button class="btn btn--primary" id="btn-scan" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+              <path d="M3 3v5h5"/>
+            </svg>
+            Escanear Red
+          </button>
+          <span class="scan-label" id="scan-label" aria-live="polite"></span>
+        </div>
+
+        <!-- Lista de dispositivos con badges de estado -->
+        <div class="devices-list" id="devices-list" role="list" aria-label="Lista de dispositivos">
+          <p class="empty-state" id="devices-empty">
+            Sin dispositivos. Pulsa "Escanear Red" para buscar.
+          </p>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ╔══════════════════════════════════╗
+         ║   CARD: ACTIVIDAD DE VOZ        ║
+         ╚══════════════════════════════════╝ -->
+    <section
+      class="card card--voice"
+      id="card-voice"
+      data-card="voice"
+      tabindex="0"
+      role="button"
+      aria-expanded="false"
+      aria-controls="voice-expanded"
+      aria-label="Panel de Actividad de Voz">
+
+      <div class="card__head">
+        <div class="card__icon-badge card__icon-badge--voice">
+          <!-- Icono: micrófono -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="12" y1="19" x2="12" y2="23"/>
+            <line x1="8" y1="23" x2="16" y2="23"/>
+          </svg>
+        </div>
+        <div class="card__info">
+          <h2 class="card__title">Voz</h2>
+          <p class="card__subtitle" id="voice-status-sub">Esperando keyword...</p>
+        </div>
+        <!-- Waveform animado en cabecera -->
+        <div class="waveform-mini" id="waveform-mini" aria-hidden="true">
+          <span class="wf-bar"></span><span class="wf-bar"></span><span class="wf-bar"></span>
+          <span class="wf-bar"></span><span class="wf-bar"></span><span class="wf-bar"></span>
+        </div>
+        <div class="card__expand-arrow" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Contenido expandido: historial de comandos -->
+      <div class="card__expanded-body" id="voice-expanded" hidden>
+        <div class="voice-log" id="voice-log" role="log" aria-label="Historial de comandos de voz" aria-live="polite">
+          <p class="empty-state">Los comandos de voz reconocidos aparecerán aquí.</p>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ╔══════════════════════════════════╗
+         ║   CARD: AJUSTES                 ║
+         ╚══════════════════════════════════╝ -->
+    <section
+      class="card card--settings"
+      id="card-settings"
+      data-card="settings"
+      tabindex="0"
+      role="button"
+      aria-expanded="false"
+      aria-controls="settings-expanded"
+      aria-label="Panel de Ajustes">
+
+      <div class="card__head">
+        <div class="card__icon-badge card__icon-badge--amber">
+          <!-- Icono: engranaje -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </div>
+        <div class="card__info">
+          <h2 class="card__title">Ajustes</h2>
+          <p class="card__subtitle">Personalizar Nika</p>
+        </div>
+        <div class="card__expand-arrow" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Contenido expandido: formulario de ajustes -->
+      <div class="card__expanded-body" id="settings-expanded" hidden>
+        <form class="settings-form" id="settings-form" novalidate>
+
+          <!-- Nombre de Nika -->
+          <div class="form-group">
+            <label class="form-label" for="set-nika-name">Nombre de invocación</label>
+            <input
+              class="form-input"
+              id="set-nika-name"
+              type="text"
+              placeholder="Nika"
+              maxlength="30"
+              autocomplete="off">
+            <span class="form-hint">Afecta solo el nombre mostrado en el dashboard. Los keywords de voz se definen en .env</span>
+          </div>
+
+          <!-- Selector de tema -->
+          <div class="form-group">
+            <label class="form-label">Tema Visual</label>
+            <div class="theme-grid" id="theme-grid" role="group" aria-label="Selecciona un tema">
+              <button type="button" class="theme-btn" data-theme="dark" id="theme-btn-dark" aria-pressed="true">
+                <span class="theme-swatch theme-swatch--dark"></span>
+                <span class="theme-btn__name">Dark</span>
+              </button>
+              <button type="button" class="theme-btn" data-theme="cyberpunk" id="theme-btn-cyberpunk" aria-pressed="false">
+                <span class="theme-swatch theme-swatch--cyberpunk"></span>
+                <span class="theme-btn__name">Cyberpunk</span>
+              </button>
+              <button type="button" class="theme-btn" data-theme="matrix" id="theme-btn-matrix" aria-pressed="false">
+                <span class="theme-swatch theme-swatch--matrix"></span>
+                <span class="theme-btn__name">Matrix</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- TTS toggle -->
+          <div class="form-group form-group--inline">
+            <label class="form-label" for="set-tts">Síntesis de Voz (espeak-ng)</label>
+            <label class="toggle" for="set-tts">
+              <input class="toggle__input" type="checkbox" id="set-tts" role="switch" aria-checked="true">
+              <span class="toggle__track" aria-hidden="true">
+                <span class="toggle__thumb"></span>
+              </span>
+            </label>
+          </div>
+
+          <!-- Velocidad de voz -->
+          <div class="form-group">
+            <label class="form-label" for="set-tts-rate">
+              Velocidad de voz
+              <span class="form-label__value" id="tts-rate-display">145</span> wpm
+            </label>
+            <input
+              class="range-slider"
+              id="set-tts-rate"
+              type="range"
+              min="80"
+              max="250"
+              step="5"
+              value="145"
+              aria-valuemin="80"
+              aria-valuemax="250"
+              aria-valuenow="145">
+          </div>
+
+          <!-- Acciones -->
+          <div class="form-actions">
+            <button type="submit" class="btn btn--primary" id="btn-save-settings">
+              Guardar Cambios
+            </button>
+            <button type="button" class="btn btn--ghost" id="btn-reset-settings">
+              Restablecer
+            </button>
+          </div>
+
+        </form>
+      </div>
+    </section>
+
+
+    <!-- ╔══════════════════════════════════╗
+         ║   CARD: CONSOLA / LOG           ║
+         ╚══════════════════════════════════╝ -->
+    <section
+      class="card card--console"
+      id="card-console"
+      data-card="console"
+      tabindex="0"
+      role="button"
+      aria-expanded="false"
+      aria-controls="console-expanded"
+      aria-label="Consola de sistema">
+
+      <div class="card__head">
+        <div class="card__icon-badge card__icon-badge--green">
+          <!-- Icono: terminal -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <polyline points="4 17 10 11 4 5"/>
+            <line x1="12" y1="19" x2="20" y2="19"/>
+          </svg>
+        </div>
+        <div class="card__info">
+          <h2 class="card__title">Consola</h2>
+          <p class="card__subtitle" id="console-subtitle">Log del sistema</p>
+        </div>
+        <div class="card__expand-arrow" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Contenido expandido: terminal de logs -->
+      <div class="card__expanded-body" id="console-expanded" hidden>
+        <div class="console-output" id="console-output" role="log" aria-label="Log de eventos" aria-live="polite">
+          <!-- Las entradas se insertan dinámicamente por app.js -->
+        </div>
+        <div class="console-footer">
+          <button class="btn btn--ghost btn--xs" id="btn-clear-console" type="button">Limpiar</button>
+          <label class="console-autoscroll">
+            <input type="checkbox" id="cb-autoscroll" checked>
+            <span>Auto-scroll</span>
+          </label>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ══════════════════════════════════════════════════
+       MODAL GENÉRICO (crear/editar modos)
+  ══════════════════════════════════════════════════ -->
+  <div class="modal-backdrop" id="modal-backdrop" hidden>
+    <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+
+      <div class="modal__header">
+        <h3 class="modal__title" id="modal-title">Nuevo Modo</h3>
+        <button class="modal__close-btn" id="modal-close-btn" type="button" aria-label="Cerrar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="modal__body" id="modal-body">
+        <!-- Contenido inyectado dinámicamente por modes.js -->
+        <form id="mode-form" novalidate>
+
+          <div class="form-group">
+            <label class="form-label" for="mode-name">Nombre del Modo *</label>
+            <input class="form-input" id="mode-name" type="text" placeholder="ej. Trabajo, Gaming, Estudio" required maxlength="100">
+          </div>
+
+          <div class="form-group form-group--row">
+            <div class="form-group">
+              <label class="form-label" for="mode-icon">Icono (emoji)</label>
+              <input class="form-input form-input--sm" id="mode-icon" type="text" placeholder="🚀" maxlength="2" value="🚀">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="mode-color">Color de acento</label>
+              <div class="color-input-wrap">
+                <input class="color-swatch-input" id="mode-color" type="color" value="#7c3aed">
+                <span class="color-hex-display" id="color-hex-display">#7c3aed</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Apps del modo -->
+          <div class="form-group">
+            <label class="form-label">Aplicaciones</label>
+            <div class="apps-list" id="modal-apps-list">
+              <!-- Las apps se insertan dinámicamente -->
+            </div>
+            <button class="btn btn--ghost btn--sm" id="btn-add-app" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M12 5v14M5 12h14"/>
+              </svg>
+              Añadir Aplicación
+            </button>
+          </div>
+
+        </form>
+      </div>
+
+      <div class="modal__footer">
+        <button class="btn btn--ghost" id="modal-btn-cancel" type="button">Cancelar</button>
+        <button class="btn btn--primary" id="modal-btn-save" type="button">Guardar Modo</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Scripts cargados en orden de dependencia -->
+  <script src="/js/app.js" defer></script>
+  <script src="/js/cards.js" defer></script>
+  <script src="/js/devices.js" defer></script>
+  <script src="/js/modes.js" defer></script>
+  <script src="/js/settings.js" defer></script>
+
+</body>
+</html>

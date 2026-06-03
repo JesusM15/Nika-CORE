@@ -1,0 +1,660 @@
+/* ═══════════════════════════════════════════════════════════════
+   Nika OS — cards.css
+   Estilos de cards: estructura, animaciones de expansión,
+   variantes por tipo y estados hover/focus/expanded.
+   Compatible con Firefox-ESR (no usa :has(), container queries, etc.)
+   ═══════════════════════════════════════════════════════════════ */
+
+
+/* ══════════════════════════════════════════════════
+   1. CARD BASE
+   ══════════════════════════════════════════════════ */
+.card {
+  /* Fondo con ligero tinte y borde luminoso */
+  background: var(--bg-surface);
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--border-subtle);
+
+  /* Sombra base */
+  box-shadow: var(--shadow-md);
+
+  /* Layout interno */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;          /* Clip del contenido expandido */
+
+  /* Transición de expansión: usamos max-height + transform */
+  transition:
+    box-shadow    var(--transition-slow),
+    border-color  var(--transition-base),
+    transform     var(--transition-slow),
+    background    var(--transition-base);
+
+  /* Cursor indica interactividad */
+  cursor: pointer;
+
+  /* Animación de entrada al cargar la página */
+  animation: card-enter var(--transition-slow) both;
+  animation-fill-mode: both;
+}
+
+/* Entrada escalonada por card */
+.card:nth-child(1) { animation-delay: 0.05s; }
+.card:nth-child(2) { animation-delay: 0.10s; }
+.card:nth-child(3) { animation-delay: 0.15s; }
+.card:nth-child(4) { animation-delay: 0.20s; }
+.card:nth-child(5) { animation-delay: 0.25s; }
+
+@keyframes card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+
+/* ── Hover (no expandido) ───────────────────────── */
+.card:not(.card--expanded):hover {
+  border-color: var(--border-default);
+  box-shadow:
+    var(--shadow-lg),
+    0 0 0 1px var(--card-accent, var(--accent)) inset,  /* Borde interior de color */
+    0 0 24px rgba(139, 92, 246, 0.08);
+  transform: translateY(-3px) scale(1.005);
+}
+
+/* Focus para accesibilidad con teclado */
+.card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* ── Estado expandido ───────────────────────────── */
+.card.card--expanded {
+  cursor: default;
+  border-color: var(--card-accent, var(--accent));
+  background: var(--bg-elevated);
+  box-shadow:
+    var(--shadow-lg),
+    0 0 0 1px var(--card-accent, var(--accent)),
+    0 0 40px rgba(139, 92, 246, 0.12);
+  transform: none;    /* Sin elevación cuando está expandido */
+
+  /* Ocupa todo el ancho del grid */
+  grid-column: 1 / -1;
+}
+
+/* Pseudo-elemento: línea de color en la parte superior de la card */
+.card::before {
+  content: '';
+  display: block;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--card-accent, var(--accent)),
+    transparent
+  );
+  opacity: 0;
+  transition: opacity var(--transition-base);
+  flex-shrink: 0;
+}
+
+.card.card--expanded::before,
+.card:hover::before {
+  opacity: 1;
+}
+
+
+/* ══════════════════════════════════════════════════
+   2. CABECERA DE CARD (siempre visible)
+   ══════════════════════════════════════════════════ */
+.card__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-5) var(--space-4);
+}
+
+/* Badge del icono */
+.card__icon-badge {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: transform var(--transition-spring), box-shadow var(--transition-base);
+}
+
+.card__icon-badge svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* Variantes de color por tipo de card */
+.card__icon-badge--violet {
+  background: var(--accent-dim);
+  color: var(--accent-light);
+  box-shadow: 0 0 12px rgba(139, 92, 246, 0.2);
+}
+
+.card__icon-badge--cyan {
+  background: var(--cyan-dim);
+  color: var(--cyan);
+  box-shadow: 0 0 12px rgba(6, 182, 212, 0.2);
+}
+
+.card__icon-badge--voice {
+  background: var(--rose-dim);
+  color: var(--rose);
+  box-shadow: 0 0 12px rgba(244, 63, 94, 0.2);
+}
+
+.card__icon-badge--amber {
+  background: var(--amber-dim);
+  color: var(--amber);
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.2);
+}
+
+.card__icon-badge--green {
+  background: var(--green-dim);
+  color: var(--green);
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.2);
+}
+
+/* Efecto hover en el badge */
+.card:hover .card__icon-badge,
+.card.card--expanded .card__icon-badge {
+  transform: scale(1.08) rotate(-3deg);
+  box-shadow: 0 0 20px var(--accent-glow);
+}
+
+/* Info: título + subtítulo */
+.card__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.card__title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card__subtitle {
+  font-size: 0.78125rem;
+  color: var(--text-muted);
+  font-weight: 400;
+  margin-top: 1px;
+}
+
+.card__subtitle span {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+/* Flecha de expansión */
+.card__expand-arrow {
+  width: 20px;
+  height: 20px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: transform var(--transition-spring), color var(--transition-fast);
+}
+
+.card__expand-arrow svg {
+  width: 18px;
+  height: 18px;
+}
+
+.card.card--expanded .card__expand-arrow {
+  transform: rotate(180deg);
+  color: var(--text-secondary);
+}
+
+
+/* ══════════════════════════════════════════════════
+   3. PREVIEW DE CARD (visible sin expandir)
+   ══════════════════════════════════════════════════ */
+.card__preview {
+  padding: 0 var(--space-5) var(--space-5);
+}
+
+.card.card--expanded .card__preview {
+  display: none;   /* Ocultar preview cuando está expandido */
+}
+
+/* ── Chips de modos ─────────────────────────────── */
+.chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 3px var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: 0.71875rem;
+  font-weight: 500;
+  background: var(--accent-dim);
+  color: var(--accent-light);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  white-space: nowrap;
+}
+
+.chip--placeholder {
+  background: var(--bg-base);
+  color: var(--text-muted);
+  border-color: var(--border-subtle);
+  font-style: italic;
+}
+
+/* ── Mini lista de dispositivos ─────────────────── */
+.device-mini-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.device-mini-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.8125rem;
+}
+
+.device-mini-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.device-mini-dot--online  { background: var(--green); }
+.device-mini-dot--offline { background: var(--text-muted); }
+
+.device-mini-name {
+  color: var(--text-secondary);
+  font-weight: 500;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-mini-status {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.device-mini-status--online  { color: var(--green); }
+.device-mini-status--offline { color: var(--text-muted); }
+
+.mini-device-placeholder {
+  font-size: 0.78125rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ── Waveform mini (card de voz) ─────────────────── */
+.waveform-mini {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.wf-bar {
+  display: block;
+  width: 3px;
+  border-radius: var(--radius-full);
+  background: var(--rose);
+  opacity: 0.5;
+  min-height: 3px;
+}
+
+/* Animación del waveform (activo cuando hay audio) */
+.waveform-mini.waveform--active .wf-bar {
+  opacity: 1;
+  animation: wf-anim 0.8s ease-in-out infinite;
+}
+
+.waveform--active .wf-bar:nth-child(1) { animation-delay: 0.0s; }
+.waveform--active .wf-bar:nth-child(2) { animation-delay: 0.1s; }
+.waveform--active .wf-bar:nth-child(3) { animation-delay: 0.2s; }
+.waveform--active .wf-bar:nth-child(4) { animation-delay: 0.3s; }
+.waveform--active .wf-bar:nth-child(5) { animation-delay: 0.2s; }
+.waveform--active .wf-bar:nth-child(6) { animation-delay: 0.1s; }
+
+@keyframes wf-anim {
+  0%, 100% { height: 4px; }
+  50%       { height: 18px; }
+}
+
+
+/* ══════════════════════════════════════════════════
+   4. CUERPO EXPANDIDO
+   ══════════════════════════════════════════════════ */
+.card__expanded-body {
+  padding: 0 var(--space-5) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+
+  /* Animación de apertura: slide-down + fade */
+  animation: expanded-body-in var(--transition-slow) cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@keyframes expanded-body-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Separador entre cabecera y cuerpo expandido */
+.card--expanded .card__head {
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: var(--space-4);
+  margin-bottom: 0;
+}
+
+/* ── Toolbar del cuerpo expandido ───────────────── */
+.expanded-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.scan-label {
+  font-size: 0.78125rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+
+/* ══════════════════════════════════════════════════
+   5. GRID DE MODOS (dentro del cuerpo expandido)
+   ══════════════════════════════════════════════════ */
+.modes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-3);
+}
+
+/* Tarjeta individual de un modo */
+.mode-card {
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  cursor: default;
+  transition: all var(--transition-base);
+  position: relative;
+  overflow: hidden;
+
+  /* La línea de color del modo se aplica como borde izquierdo */
+  border-left: 3px solid var(--mode-color, var(--accent));
+}
+
+.mode-card:hover {
+  border-color: var(--mode-color, var(--accent));
+  background: var(--bg-elevated);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.mode-card__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.mode-card__icon {
+  font-size: 1.5rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.mode-card__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.mode-card__name {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mode-card__app-count {
+  font-size: 0.71875rem;
+  color: var(--text-muted);
+}
+
+/* Apps del modo (lista compacta) */
+.mode-card__apps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.mode-app-tag {
+  font-size: 0.6875rem;
+  padding: 2px var(--space-2);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* Acciones del modo */
+.mode-card__actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: auto;
+}
+
+.mode-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: 4px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: 0.71875rem;
+  font-weight: 500;
+  transition: all var(--transition-fast);
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.mode-action-btn svg {
+  width: 12px;
+  height: 12px;
+  stroke-width: 2;
+}
+
+.mode-action-btn--launch {
+  background: var(--accent-dim);
+  color: var(--accent-light);
+  border-color: rgba(139, 92, 246, 0.2);
+  flex: 1;
+}
+
+.mode-action-btn--launch:hover {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+
+.mode-action-btn--edit {
+  background: transparent;
+  color: var(--text-muted);
+  border-color: var(--border-subtle);
+}
+
+.mode-action-btn--edit:hover {
+  color: var(--text-primary);
+  border-color: var(--border-default);
+}
+
+.mode-action-btn--delete {
+  background: transparent;
+  color: var(--text-muted);
+  border-color: var(--border-subtle);
+}
+
+.mode-action-btn--delete:hover {
+  color: var(--red);
+  background: var(--red-dim);
+  border-color: transparent;
+}
+
+
+/* ══════════════════════════════════════════════════
+   6. LISTA DE DISPOSITIVOS (expandido)
+   ══════════════════════════════════════════════════ */
+.devices-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.device-card {
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  transition: all var(--transition-base);
+}
+
+.device-card--online { border-color: rgba(16, 185, 129, 0.2); }
+.device-card--offline { opacity: 0.6; }
+
+.device-card__status {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.device-card__status--online  { background: var(--green); box-shadow: 0 0 8px var(--green-glow); }
+.device-card__status--offline { background: var(--text-muted); }
+
+.device-card__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.device-card__hostname {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.device-card__meta {
+  font-size: 0.71875rem;
+  color: var(--text-muted);
+  display: flex;
+  gap: var(--space-3);
+  margin-top: 2px;
+}
+
+.device-card__apps-count {
+  font-size: 0.71875rem;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+.device-card__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.device-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  transition: all var(--transition-fast);
+  cursor: pointer;
+  border: 1px solid var(--border-subtle);
+}
+
+.device-action-btn svg { width: 13px; height: 13px; stroke-width: 2; }
+
+.device-action-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border-color: var(--border-default);
+}
+
+.device-action-btn--shutdown:hover {
+  color: var(--red);
+  background: var(--red-dim);
+  border-color: transparent;
+}
+
+
+/* ══════════════════════════════════════════════════
+   7. VARIANTES DE CARD POR TIPO
+   Cada tipo tiene su propio color de acento.
+   ══════════════════════════════════════════════════ */
+
+.card--modes    { --card-accent: var(--accent); }
+.card--devices  { --card-accent: var(--cyan);   }
+.card--voice    { --card-accent: var(--rose);   }
+.card--settings { --card-accent: var(--amber);  }
+.card--console  { --card-accent: var(--green);  }
+
+/* Hover glow por tipo */
+.card--modes:not(.card--expanded):hover    { box-shadow: var(--shadow-lg), 0 0 28px rgba(139, 92, 246, 0.12); }
+.card--devices:not(.card--expanded):hover  { box-shadow: var(--shadow-lg), 0 0 28px rgba(6, 182, 212, 0.12);  }
+.card--voice:not(.card--expanded):hover    { box-shadow: var(--shadow-lg), 0 0 28px rgba(244, 63, 94, 0.12); }
+.card--settings:not(.card--expanded):hover { box-shadow: var(--shadow-lg), 0 0 28px rgba(245, 158, 11, 0.12); }
+.card--console:not(.card--expanded):hover  { box-shadow: var(--shadow-lg), 0 0 28px rgba(16, 185, 129, 0.12); }
+
+/* Borde de card expandida por tipo */
+.card--modes.card--expanded    { border-color: var(--accent); box-shadow: var(--shadow-lg), 0 0 40px rgba(139, 92, 246, 0.12); }
+.card--devices.card--expanded  { border-color: var(--cyan);   box-shadow: var(--shadow-lg), 0 0 40px rgba(6, 182, 212, 0.12);  }
+.card--voice.card--expanded    { border-color: var(--rose);   box-shadow: var(--shadow-lg), 0 0 40px rgba(244, 63, 94, 0.12);  }
+.card--settings.card--expanded { border-color: var(--amber);  box-shadow: var(--shadow-lg), 0 0 40px rgba(245, 158, 11, 0.12); }
+.card--console.card--expanded  { border-color: var(--green);  box-shadow: var(--shadow-lg), 0 0 40px rgba(16, 185, 129, 0.12); }
