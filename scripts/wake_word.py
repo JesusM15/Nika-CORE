@@ -58,8 +58,7 @@ VOSK_MODEL_PATH  = os.getenv("VOSK_MODEL_PATH", "models/vosk-model-es-0.42")
 AUDIO_DEVICE_IDX = int(os.getenv("AUDIO_DEVICE_INDEX", "-1"))
 API_PORT         = os.getenv("API_PORT", "8000")
 API_URL          = f"http://localhost:{API_PORT}"
-# Dispositivo ALSA de SALIDA para espeak-ng (ej. hw:1,0 para USB card 1)
-TTS_ALSA_DEVICE  = os.getenv("TTS_ALSA_DEVICE", "hw:1,0")
+TTS_ALSA_DEVICE  = os.getenv("TTS_ALSA_DEVICE", "plughw:1,0")
 
 # Parámetros de audio: Vosk requiere 16kHz mono 16-bit
 SAMPLE_RATE  = 16000     # Hz (Requerido por Vosk internamente)
@@ -150,7 +149,7 @@ class WakeWordDetector:
 
         # ── TTS: espeak-ng ────────────────────────────────────────────────────
         self._tts_rate   = int(os.getenv("TTS_RATE", "145"))
-        self._tts_volume = int(os.getenv("TTS_VOLUME", "80"))
+        self._tts_volume = int(os.getenv("TTS_VOLUME", "200"))
         self._tts_enabled = os.getenv("TTS_ENABLED", "true").lower() == "true"
 
         logger.info(f"[WakeWord] TTS: {'activado' if self._tts_enabled else 'desactivado'}")
@@ -192,7 +191,7 @@ class WakeWordDetector:
             # espeak-ng genera audio PCM a su stdout
             espeak_proc = subprocess.Popen(
                 ["espeak-ng",
-                 "-v", "es",
+                 "-v", "es+f2",
                  "-s", str(self._tts_rate),
                  "-a", str(self._tts_volume),
                  "--stdout",
