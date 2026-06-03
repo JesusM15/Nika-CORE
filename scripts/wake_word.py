@@ -62,8 +62,8 @@ API_URL          = f"http://localhost:{API_PORT}"
 # Parámetros de audio: Vosk requiere 16kHz mono 16-bit
 SAMPLE_RATE  = 16000     # Hz (Requerido por Vosk internamente)
 HARDWARE_SAMPLE_RATE = int(os.getenv("HARDWARE_SAMPLE_RATE", "16000")) # Tasa física del mic
-CHUNK_SIZE   = 4096      # Frames por chunk
-N_CHANNELS   = 1         # Mono
+CHUNK_SIZE   = 8000      # Frames por chunk
+N_CHANNELS   = int(os.getenv("HARDWARE_CHANNELS", "1")) # Canales físicos (mono=1, estéreo=2)
 
 # Segundos de audio a grabar DESPUÉS de detectar la keyword
 COMMAND_RECORD_SECS = 5.0
