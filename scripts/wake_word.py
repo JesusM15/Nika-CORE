@@ -58,6 +58,8 @@ VOSK_MODEL_PATH  = os.getenv("VOSK_MODEL_PATH", "models/vosk-model-es-0.42")
 AUDIO_DEVICE_IDX = int(os.getenv("AUDIO_DEVICE_INDEX", "-1"))
 API_PORT         = os.getenv("API_PORT", "8000")
 API_URL          = f"http://localhost:{API_PORT}"
+# Dispositivo ALSA de SALIDA para espeak-ng (ej. hw:1,0 para USB card 1)
+TTS_ALSA_DEVICE  = os.getenv("TTS_ALSA_DEVICE", "hw:1,0")
 
 # Parámetros de audio: Vosk requiere 16kHz mono 16-bit
 SAMPLE_RATE  = 16000     # Hz (Requerido por Vosk internamente)
@@ -169,32 +171,52 @@ class WakeWordDetector:
 
     def speak(self, text: str):
         """
-        Sintetiza voz con espeak-ng de forma no bloqueante (subprocess Popen).
+        Sintetiza voz con espeak-ng de forma no bloqueante.
 
-        Flags de espeak-ng usados:
-          -v es       → voz en español (es-419 para latam si está disponible)
+        Flujo: espeak-ng --stdout → pipe → aplay -D {TTS_ALSA_DEVICE}
+
+        Al usar --stdout, espeak-ng genera el PCM en lugar de intentar
+        abrir /dev/dsp directamente, y aplay lo envía al dispositivo ALSA
+        correcto (ej. hw:1,0 para el adaptador USB con micrófono y bocina).
+
+        Flags de espeak-ng:
+          -v es       → voz en español
           -s {rate}   → velocidad en palabras por minuto
           -a {volume} → amplitud (volumen) 0-200
-          --ipa       → silencioso si no soporta el flag, ignorado
+          --stdout    → escribir PCM a stdout en lugar de reproducir directo
         """
         if not self._tts_enabled:
             return
 
         try:
-            subprocess.Popen(
+            # espeak-ng genera audio PCM a su stdout
+            espeak_proc = subprocess.Popen(
                 ["espeak-ng",
                  "-v", "es",
                  "-s", str(self._tts_rate),
                  "-a", str(self._tts_volume),
+                 "--stdout",
                  text],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+            # aplay recibe el PCM por stdin y lo reproduce en el dispositivo USB
+            subprocess.Popen(
+                ["aplay", "-D", TTS_ALSA_DEVICE, "-"],
+                stdin=espeak_proc.stdout,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-        except FileNotFoundError:
-            # espeak-ng no instalado (común en Windows sin instalación manual)
-            logger.debug(f"[WakeWord] espeak-ng no disponible. TTS texto: '{text}'")
+            # Permitir que espeak_proc sepa que aplay tomó el pipe
+            if espeak_proc.stdout:
+                espeak_proc.stdout.close()
+
+        except FileNotFoundError as e:
+            # espeak-ng o aplay no instalados
+            logger.warning(f"[WakeWord] TTS no disponible (espeak-ng/aplay): {e}")
+            logger.warning("  → Instala con: sudo apt install espeak-ng alsa-utils")
         except Exception as e:
-            logger.debug(f"[WakeWord] Error TTS: {e}")
+            logger.warning(f"[WakeWord] Error TTS: {e}")
 
     # ── Stream de audio ───────────────────────────────────────────────────────
 
