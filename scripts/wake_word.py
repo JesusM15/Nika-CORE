@@ -60,7 +60,8 @@ API_PORT         = os.getenv("API_PORT", "8000")
 API_URL          = f"http://localhost:{API_PORT}"
 
 # Parámetros de audio: Vosk requiere 16kHz mono 16-bit
-SAMPLE_RATE  = 16000     # Hz
+SAMPLE_RATE  = 16000     # Hz (Requerido por Vosk internamente)
+HARDWARE_SAMPLE_RATE = int(os.getenv("HARDWARE_SAMPLE_RATE", "16000")) # Tasa física del mic
 CHUNK_SIZE   = 4096      # Frames por chunk
 N_CHANNELS   = 1         # Mono
 
@@ -160,7 +161,7 @@ class WakeWordDetector:
         Crea un nuevo KaldiRecognizer con el modelo cargado.
         SetWords(True) incluye timestamps y confianza por palabra en los resultados.
         """
-        rec = KaldiRecognizer(self.model, float(SAMPLE_RATE))
+        rec = KaldiRecognizer(self.model, float(HARDWARE_SAMPLE_RATE))
         rec.SetWords(True)
         return rec
 
@@ -205,14 +206,14 @@ class WakeWordDetector:
             stream = self.audio.open(
                 format=pyaudio.paInt16,          # PCM 16-bit (requerido por Vosk)
                 channels=N_CHANNELS,
-                rate=SAMPLE_RATE,
+                rate=HARDWARE_SAMPLE_RATE,
                 input=True,
                 input_device_index=device_idx,
                 frames_per_buffer=CHUNK_SIZE,
             )
             logger.info(
                 f"[WakeWord] ✓ Stream de audio abierto: "
-                f"{SAMPLE_RATE}Hz, {N_CHANNELS}ch, chunk={CHUNK_SIZE}"
+                f"{HARDWARE_SAMPLE_RATE}Hz, {N_CHANNELS}ch, chunk={CHUNK_SIZE}"
             )
             return stream
         except Exception as e:
