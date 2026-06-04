@@ -39,19 +39,17 @@ INTENT_PATTERNS: list[Tuple[str, re.Pattern]] = [
     # ── ACTIVAR MODO (prioridad máxima — evita conflicto con "abre") ───────────
     # Matches: "modo trabajo", "activa el modo gaming", "cambia a modo estudio en MSI"
     ("activate_mode", re.compile(
-        r"(?:"
-        r"(?:activa|abre|inicia|lanza|pon|enciende|cambia\s+a|ejecuta)(?:\s+(?:el\s+)?)?"
+        r"^(?:(?:activa|abre|inicia|lanza|pon|enciende|cambia|ejecuta)\b\s*(?:a\s+)?(?:el\s+)?)?"
         r"modo\s+"
-        r"|(?:^|\s)modo\s+"
-        r")(.+?)(?:\s+en\s+(.+))?$",
+        r"(.+?)(?:\s+en\s+(.+))?$",
         re.IGNORECASE,
     )),
 
     # ── CONTROL DE MÚSICA (antes de open_app para que "pon música" no abra "música") ─
     # Matches: "pon música", "reproduce una cancion de taylor", "quiero escuchar a the weeknd"
     ("play_music", re.compile(
-        r"(?:(?:puedes\s+|podr[ií]as\s+|quiero\s+(?:que\s+)?|por\s+favor\s+)?(?:pon(?:me)?|coloca|reproduce|reprod[uú]ceme|toca|lanza|escuchar|quiero\s+escuchar))\s+"
-        r"(?:(?:la\s+|una\s+)?(?:m[uú]sica|canci[oó]n|pista|rola)(?:\s+de)?|(?:el\s+|un\s+)?(?:[aá]lbum|disco)|(?:el\s+|un\s+)?artista|a\s+)?\s*"
+        r"^(?:pon|coloca|reproduce|reproducir|toca|lanza|escucha(?:r)?)\b\s*"
+        r"(?:(?:me\s+)?(?:la\s+|una\s+|un\s+)?(?:m[uú]sica|algo\s+de|canci[oó]n|pista|rola)(?:\s+de)?|(?:el\s+|un\s+)?(?:[aá]lbum|disco)|(?:el\s+|un\s+)?artista|a\s+)?\s*"
         r"(.*?)"
         r"(?:\s+en\s+(.+))?$",
         re.IGNORECASE,
@@ -75,14 +73,14 @@ INTENT_PATTERNS: list[Tuple[str, re.Pattern]] = [
     # ── ABRIR APLICACIÓN ───────────────────────────────────────────────────────
     # Matches: "abreme spotify", "puedes arrancar word", "habre el navegador"
     ("open_app", re.compile(
-        r"(?:(?:puedes\s+|podr[ií]as\s+|quiero\s+(?:que\s+)?|por\s+favor\s+)?(?:[aá]bre(?:me)?|habre(?:me)?|inicia|ejecuta|lanza|pon(?:me)?|enciende|arranca|mu[eé]strame))\s+(.+?)(?:\s+en\s+(.+))?$",
+        r"^(?:[aá]bre|habre|inicia|ejecuta|lanza|pon|enciende|arranca|mu[eé]stra)\b\s*(?:me\s+)?(.+?)(?:\s+en\s+(.+))?$",
         re.IGNORECASE,
     )),
 
     # ── CERRAR APLICACIÓN ──────────────────────────────────────────────────────
     # Matches: "cierrame spotify", "por favor sierra chrome", "quita el juego"
     ("close_app", re.compile(
-        r"(?:(?:puedes\s+|podr[ií]as\s+|quiero\s+(?:que\s+)?|por\s+favor\s+)?(?:cierra(?:me)?|sierra(?:me)?|det[eé]n|detiene|para|mata|quita|apaga))\s+(.+?)(?:\s+en\s+(.+))?$",
+        r"^(?:cierra|sierra|det[eé]n|detiene|para|mata|quita|apaga)\b\s*(?:me\s+)?(.+?)(?:\s+en\s+(.+))?$",
         re.IGNORECASE,
     )),
 
@@ -105,14 +103,14 @@ INTENT_PATTERNS: list[Tuple[str, re.Pattern]] = [
     # ── REDACTAR EMAIL ─────────────────────────────────────────────────────────
     # Matches: "redacta un correo a juan", "escribe un email"
     ("send_email", re.compile(
-        r"(?:(?:puedes\s+|podr[ií]as\s+|quiero\s+(?:que\s+)?|por\s+favor\s+)?(?:redacta(?:me)?|escribe|manda|env[ií]a)(?:\s+un)?\s+(?:correo|email|e-mail))(?:\s+a\s+(.+?))?(?:\s+(?:con\s+el\s+)?asunto\s+(.+))?$",
+        r"^(?:redacta|escribe|manda|env[ií]a)\b\s*(?:me\s+)?(?:.*?)(?:correo|email|e-mail|mensaje)(?:\s+a\s+(.+?))?(?:\s+(?:con\s+(?:el\s+)?asunto|sobre)\s+(.+))?$",
         re.IGNORECASE,
     )),
 
     # ── BÚSQUEDA WEB ───────────────────────────────────────────────────────────
     # Matches: "busca en google recetas", "googlea sobre perros", "investiga"
     ("web_search", re.compile(
-        r"(?:(?:puedes\s+|podr[ií]as\s+|quiero\s+(?:que\s+)?|por\s+favor\s+)?(?:b[uú]sca(?:me)?|buscar|b[uú]scalo|investiga(?:me)?|googlea))\s+"
+        r"^(?:b[uú]sca|buscar|investiga|googlea)\b\s*(?:me\s+)?(?:lo\s+)?"
         r"(?:(?:algo\s+)?(?:en\s+)?(?:google|internet|la\s+web)\s+(?:sobre\s+|de\s+)?)?"
         r"(.*?)"
         r"(?:\s+en\s+(.+))?$",
@@ -227,11 +225,25 @@ class Orchestrator:
     def _extract_intent(self, text: str) -> Tuple[Optional[str], Optional[re.Match]]:
         """
         Evalúa el texto contra los patrones de intención en orden de prioridad.
-
-        Returns:
-            (nombre_intención, match_object) o (None, None) si no hay coincidencia.
+        Usa algoritmos de normalización para limpiar la basura de la STT antes
+        de aplicar las expresiones regulares.
         """
         normalized = text.lower().strip()
+        
+        # ── NORMALIZACIÓN ALGORÍTMICA (NLU Pre-processing) ──
+        # 1. Elimina palabras de cortesía y muletillas al inicio
+        normalized = re.sub(r'^(?:oye|mira|nika|por\s+favor|puedes|podr[ií]as|quiero(?:\s+que)?|necesito(?:\s+que)?|me\s+gustar[ií]a|trata\s+de|intenta)\s+', '', normalized).strip()
+        
+        # 2. Corrige errores típicos de la IA de voz (ej. letras repetidas "unn")
+        normalized = re.sub(r'\bunn+\b', 'un', normalized)
+        normalized = re.sub(r'\b(y|e)\s+intento\b', 'intento', normalized) # ruido
+        
+        # 3. Separa el "me" o "lo" adherido a los verbos para simplificar regex
+        # ej: "mandame" -> "manda me", "abreme" -> "abre me", "buscalo" -> "busca lo"
+        normalized = re.sub(r'\b(manda|redacta|escribe|abre|habre|cierra|sierra|pon|reproduce|busca|investiga|apaga|enciende)(me|lo|la|le)\b', r'\1 \2', normalized)
+        
+        normalized = normalized.strip()
+        logger.debug(f"[Orchestrator] Texto normalizado para NLU: '{normalized}'")
 
         for intent_name, pattern in INTENT_PATTERNS:
             match = pattern.search(normalized)
@@ -239,7 +251,7 @@ class Orchestrator:
                 logger.debug(f"[Orchestrator] Intención: '{intent_name}' | match='{match.group(0)}'")
                 return intent_name, match
 
-        logger.warning(f"[Orchestrator] Sin intención para: '{text}'")
+        logger.warning(f"[Orchestrator] Sin intención para: '{text}' (normalizado: '{normalized}')")
         return None, None
 
     # ══════════════════════════════════════════════════

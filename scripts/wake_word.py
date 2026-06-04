@@ -81,6 +81,7 @@ WAKE_WORDS: set[str] = {
     # Variaciones principales
     "nika", "nica", "nyka", "nikas", "nicas", "nykas",
     "mica", "kika", "mika", "lika", "dica", "ni k", "ni cap",
+    "nita", "mita", "niga", "nicha", "neta", "dika", "micas",
     # Con puntuación (artefactos de Vosk)
     "nika.", "nica.", "nyka.", "hola.",
     # Con saludo (activación más natural)
@@ -88,6 +89,7 @@ WAKE_WORDS: set[str] = {
     "oye nika",  "oye nica",  "oye nyka",
     # Otras opciones pedidas
     "hola", "ola", "buenas", "despierta", "me oyes", "escuchas",
+    "oye", "hey", "ey", "escuchame", "despiertate", "atencion",
     # Errores fonéticos comunes en español
     "nica os",   "nika os",
 }
