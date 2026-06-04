@@ -709,9 +709,9 @@ class Orchestrator:
             import google.generativeai as genai
             genai.configure(api_key=api_key)
             
-            # Usar el modelo rápido y gratuito
+            # Usar el modelo gemini-pro que es más compatible
             model = genai.GenerativeModel(
-                'gemini-1.5-flash', 
+                'gemini-pro', 
                 system_instruction="Eres Nika, un asistente virtual de PC inteligente, amigable y muy conciso. Da respuestas muy breves y directas en español (1 o 2 oraciones máximo) porque vas a ser leída en voz alta por un sintetizador de voz. No uses asteriscos ni markdown."
             )
             # Ejecutar de forma síncrona en un hilo para no bloquear el loop asyncio, o simplemente directo
