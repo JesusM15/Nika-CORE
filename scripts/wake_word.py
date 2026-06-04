@@ -63,11 +63,16 @@ TTS_ALSA_DEVICE  = os.getenv("TTS_ALSA_DEVICE", "plughw:1,0")
 # Parámetros de audio: Vosk requiere 16kHz mono 16-bit
 SAMPLE_RATE  = 16000     # Hz (Requerido por Vosk internamente)
 HARDWARE_SAMPLE_RATE = int(os.getenv("HARDWARE_SAMPLE_RATE", "16000")) # Tasa física del mic
-CHUNK_SIZE   = 16000      # Frames por chunk
-N_CHANNELS   = int(os.getenv("HARDWARE_CHANNELS", "1")) # Canales físicos (mono=1, estéreo=2)
+
+CHUNK_SIZE   = int(os.getenv("CHUNK_SIZE", "4000"))      # Frames por chunk (4000=0.25s, más responsivo)
+N_CHANNELS   = int(os.getenv("HARDWARE_CHANNELS", "1"))   # Canales físicos (mono>>>>>>> e2ab4b6a7c169e9ea865dbb813700086aec41c66
 
 # Segundos de audio a grabar DESPUÉS de detectar la keyword
-COMMAND_RECORD_SECS = 5.0
+COMMAND_RECORD_SECS = float(os.getenv("COMMAND_RECORD_SECS", "5.0"))
+
+# Número de chunks pre-keyword a guardar (captura inicio de habla solapado)
+# Con CHUNK_SIZE=4000 y 16kHz, cada chunk = 0.25s, entonces 3 chunks = 0.75s
+PRE_KEYWORD_CHUNKS = int(os.getenv("PRE_KEYWORD_CHUNKS", "3"))
 
 # ── Set de keywords y variaciones fonéticas ───────────────────────────────────
 # Incluye variaciones comunes en STT español y errores fonéticos frecuentes.
@@ -146,6 +151,10 @@ class WakeWordDetector:
         self._running         = False
         self._command_buffer: list[bytes] = []
         self._record_start    = 0.0
+
+        # Buffer circular de chunks pre-keyword (captura inicio de habla solapado)
+        from collections import deque
+        self._pre_buffer: deque = deque(maxlen=PRE_KEYWORD_CHUNKS)
 
         # ── TTS: espeak-ng ────────────────────────────────────────────────────
         self._tts_rate   = int(os.getenv("TTS_RATE", "145"))
@@ -293,19 +302,27 @@ class WakeWordDetector:
         Procesamiento en estado IDLE.
         Alimenta el chunk a Vosk y verifica si hay keyword
         tanto en resultados parciales (baja latencia) como finales.
-        """
-        # ── Resultado parcial (tiempo real, baja latencia) ────────────────────
-        # Vosk emite resultados parciales frecuentemente mientras el usuario habla.
-        # Esto nos permite detectar la keyword sin esperar a que termine la frase.
-        partial_json = json.loads(self.recognizer.PartialResult())
-        partial_text = partial_json.get("partial", "")
-        if partial_text and self._contains_wake_word(partial_text):
-            logger.info(f"[WakeWord] Keyword en parcial: '{partial_text}'")
-            self._on_keyword_detected()
-            return
 
-        # ── Resultado final (cuando el usuario deja de hablar) ────────────────
-        if self.recognizer.AcceptWaveform(data):
+        IMPORTANTE: Se llama AcceptWaveform ANTES de PartialResult para que
+        el resultado parcial incluya el chunk recién alimentado (no el anterior).
+        """
+        # Guardar chunk en el buffer circular pre-keyword
+        self._pre_buffer.append(data)
+
+        # ── Alimentar chunk actual PRIMERO ────────────────────────────────
+        is_final = self.recognizer.AcceptWaveform(data)
+
+        # ── Resultado parcial (ahora incluye el chunk actual) ─────────────
+        if not is_final:
+            partial_json = json.loads(self.recognizer.PartialResult())
+            partial_text = partial_json.get("partial", "")
+            if partial_text and self._contains_wake_word(partial_text):
+                logger.info(f"[WakeWord] Keyword en parcial: '{partial_text}'")
+                self._on_keyword_detected()
+                return
+
+        # ── Resultado final (cuando el usuario deja de hablar) ────────────
+        if is_final:
             final_json = json.loads(self.recognizer.Result())
             final_text = final_json.get("text", "")
             if final_text:

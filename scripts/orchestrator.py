@@ -13,7 +13,9 @@ Pipeline NLU (Natural Language Understanding) basado en:
 Intenciones soportadas:
   - open_app:       "abre spotify [en laptop-01]"
   - close_app:      "cierra word"
-  - activate_mode:  "modo trabajo" / "activa el modo gaming"
+  - activate_mode:  "modo trabajo" / "activa el modo gaming" / "abre modo estudio en MSI"
+  - play_music:     "pon música [en MSI]" / "reproduce música"
+  - media_control:  "pausa la música" / "siguiente canción" / "sube el volumen"
   - shutdown_device:"apaga el laptop"
   - scan_devices:   "qué dispositivos hay" / "escanea la red"
   - system_status:  "cómo estás" / "estado del sistema"
@@ -22,6 +24,7 @@ Intenciones soportadas:
 import re
 import json
 import logging
+import difflib
 from typing import Optional, Tuple, Dict, Any
 
 logger = logging.getLogger("nika.orchestrator")
@@ -33,10 +36,39 @@ logger = logging.getLogger("nika.orchestrator")
 # ══════════════════════════════════════════════════════
 INTENT_PATTERNS: list[Tuple[str, re.Pattern]] = [
 
-    # ── ACTIVAR MODO (alta prioridad para evitar conflictos con "abre") ────────
-    # Matches: "modo trabajo", "activa el modo gaming", "activa modo estudio"
+    # ── ACTIVAR MODO (prioridad máxima — evita conflicto con "abre") ───────────
+    # Matches: "modo trabajo", "activa el modo gaming", "abre modo estudio en MSI"
+    # group(1) = nombre del modo, group(2) = hint de dispositivo (opcional)
     ("activate_mode", re.compile(
-        r"(?:activa(?:\s+(?:el\s+)?)?modo\s+|(?:^|\s)modo\s+)(.+)$",
+        r"(?:"
+        r"(?:activa|abre|inicia|lanza)(?:\s+(?:el\s+)?)?"
+        r"modo\s+"
+        r"|(?:^|\s)modo\s+"
+        r")(.+?)(?:\s+en\s+(.+))?$",
+        re.IGNORECASE,
+    )),
+
+    # ── CONTROL DE MÚSICA (antes de open_app para que "pon música" no abra "música") ─
+    # Matches: "pon música", "reproduce música en MSI", "ponme música"
+    ("play_music", re.compile(
+        r"(?:pon(?:me)?|reproduce|ponme|echa|lanza)\s+"
+        r"(?:la\s+)?m[uú]sica"
+        r"(?:\s+en\s+(.+))?$",
+        re.IGNORECASE,
+    )),
+
+    # ── CONTROL MULTIMEDIA (pausa, siguiente, volumen) ────────────────────────
+    # Matches: "pausa la música", "siguiente canción", "sube el volumen"
+    ("media_control", re.compile(
+        r"(?:"
+        r"(?:pausa|para|detiene?)(?:\s+(?:la\s+)?m[uú]sica)?"
+        r"|(?:siguiente|salta(?:\s+la)?)\s+(?:canci[oó]n|pista|track)"
+        r"|(?:anterior|atr[aá]s)\s+(?:canci[oó]n|pista|track)"
+        r"|(?:sube|baja|m[aá]s|menos)\s+(?:el\s+)?volumen"
+        r"|continua(?:\s+(?:la\s+)?m[uú]sica)?"
+        r"|resume(?:\s+(?:la\s+)?m[uú]sica)?"
+        r")"
+        r"(?:\s+en\s+(.+))?$",
         re.IGNORECASE,
     )),
 
@@ -142,6 +174,8 @@ class Orchestrator:
                 "open_app":       self._handle_open_app,
                 "close_app":      self._handle_close_app,
                 "activate_mode":  self._handle_activate_mode,
+                "play_music":     self._handle_play_music,
+                "media_control":  self._handle_media_control,
                 "shutdown_device":self._handle_shutdown_device,
                 "scan_devices":   self._handle_scan_devices,
                 "system_status":  self._handle_system_status,
@@ -251,9 +285,16 @@ class Orchestrator:
         """
         Activa un Modo: busca sus apps en la DB y lanza cada una
         en su dispositivo asignado vía MQTT.
+
+        Ahora soporta override de dispositivo por voz:
+          "abre modo estudio"       → usa el device_id de cada app
+          "abre modo estudio en MSI" → manda TODAS las apps a MSI
         """
-        mode_name = match.group(1).strip()
-        logger.info(f"[Orchestrator] Activando modo: '{mode_name}'")
+        mode_name   = match.group(1).strip()
+        device_hint = match.group(2).strip() if match.lastindex >= 2 and match.group(2) else None
+
+        logger.info(f"[Orchestrator] Activando modo: '{mode_name}'"
+                     + (f" en dispositivo hint='{device_hint}'" if device_hint else ""))
 
         if not self.db_factory:
             return {
@@ -283,22 +324,43 @@ class Orchestrator:
                     "data":     {},
                 }
 
-            # Lanzar todas las apps del modo en sus respectivos dispositivos
+            # Si el usuario dijo "en MSI", resolver ese dispositivo
+            override_device = None
+            if device_hint:
+                override_device = self._resolve_device(device_hint)
+                if not override_device:
+                    return {
+                        "success":  False,
+                        "action":   "activate_mode",
+                        "response": f"No encontré el dispositivo '{device_hint}'. "
+                                    f"Di 'escanea la red' primero.",
+                        "data":     {},
+                    }
+
+            # Lanzar todas las apps del modo
             launched = []
             failed   = []
 
             for app in mode.apps:
+                # El device_id se toma del override de voz, o del que tenga la app,
+                # o se resuelve al primer dispositivo online
+                target_device = override_device or app.device_id or self._resolve_device(None)
+
+                if not target_device:
+                    failed.append(f"{app.app_name}@sin_dispositivo")
+                    continue
+
                 command = {
                     "action":   "open_app",
                     "app_name": app.app_name,
-                    "app_path": app.app_path,
+                    "app_path": app.app_name,   # Solo nombre: el cliente resuelve la ruta
                     "mode_id":  mode.id,
                     "mode_name":mode.name,
                 }
-                if self.mqtt and self.mqtt.publish_command(app.device_id, command):
-                    launched.append(f"{app.app_name}@{app.device_id}")
+                if self.mqtt and self.mqtt.publish_command(target_device, command):
+                    launched.append(f"{app.app_name}@{target_device}")
                 else:
-                    failed.append(f"{app.app_name}@{app.device_id}")
+                    failed.append(f"{app.app_name}@{target_device}")
 
             response = f"Modo {mode.name} activado. Iniciando {len(launched)} aplicaciones."
             if failed:
@@ -394,13 +456,15 @@ class Orchestrator:
         """
         Resuelve el ID del dispositivo a partir de un hint de texto.
 
-        Estrategia:
-          1. Si hay hint: busca dispositivos cuyo hostname contenga el hint.
+        Estrategia (mejorada con fuzzy matching):
+          1. Si hay hint:
+             a. Match exacto por substring (case-insensitive)
+             b. Fuzzy matching con difflib sobre hostnames
           2. Si no hay hint o no hay match: usa el primer dispositivo online.
           3. Si no hay ningún dispositivo online: retorna None.
 
         Args:
-            hint: String opcional del usuario (ej. "laptop", "gaming", "mi pc").
+            hint: String opcional del usuario (ej. "MSI", "laptop", "gaming").
 
         Returns:
             device_id (hostname) del dispositivo a usar, o None.
@@ -415,13 +479,136 @@ class Orchestrator:
             return None
 
         if hint:
-            hint_lower = hint.lower().replace("el ", "").replace("mi ", "").strip()
+            # Limpiar artículos y posesivos del hint
+            hint_clean = hint.lower()
+            for word in ("el ", "mi ", "la ", "los ", "las ", "del "):
+                hint_clean = hint_clean.replace(word, "")
+            hint_clean = hint_clean.strip()
+
+            # ── Paso A: Match por substring ─────────────────────────────────
             for device_id in online:
-                if hint_lower in device_id.lower():
+                if hint_clean in device_id.lower():
+                    logger.info(f"[Orchestrator] Device match (substring): '{hint}' → '{device_id}'")
                     return device_id
+
+            # ── Paso B: Fuzzy matching con difflib ──────────────────────────
+            # Busca el hostname más similar al hint
+            device_ids = list(online.keys())
+            best_match = difflib.get_close_matches(
+                hint_clean,
+                [d.lower() for d in device_ids],
+                n=1,
+                cutoff=0.4,    # Umbral bajo: "MSI" debe matchear "MSI-GF63"
+            )
+            if best_match:
+                # Encontrar el device_id original (case-preserving)
+                for device_id in device_ids:
+                    if device_id.lower() == best_match[0]:
+                        logger.info(f"[Orchestrator] Device match (fuzzy): '{hint}' → '{device_id}'")
+                        return device_id
+
+            # ── Paso C: Match parcial por tokens del hostname ───────────────
+            # "gaming" matchea "DESKTOP-GAMING-01" separando por guiones
+            for device_id in device_ids:
+                tokens = device_id.lower().replace("-", " ").replace("_", " ").split()
+                if hint_clean in tokens:
+                    logger.info(f"[Orchestrator] Device match (token): '{hint}' → '{device_id}'")
+                    return device_id
+
+            logger.warning(f"[Orchestrator] No se encontró dispositivo para hint: '{hint}'")
 
         # Fallback: primer dispositivo online (orden de inserción en Python 3.7+)
         return next(iter(online))
+
+    # ══════════════════════════════════════════════════
+    #  HANDLERS DE MÚSICA Y MULTIMEDIA
+    # ══════════════════════════════════════════════════
+
+    async def _handle_play_music(self, match: re.Match) -> Dict[str, Any]:
+        """
+        Abre Spotify y reproduce música en el dispositivo indicado.
+        Si no se indica dispositivo, usa el primero disponible.
+
+        Match grupos:
+          group(1) → hint del dispositivo, opcional (ej. "MSI")
+        """
+        device_hint = match.group(1).strip() if match.lastindex >= 1 and match.group(1) else None
+        device_id   = self._resolve_device(device_hint)
+
+        if not device_id:
+            return {
+                "success":  False,
+                "action":   "play_music",
+                "response": "No hay dispositivos conectados para reproducir música.",
+                "data":     {},
+            }
+
+        command = {
+            "action":   "play_music",
+            "service":  "spotify",
+        }
+
+        success = self.mqtt.publish_command(device_id, command) if self.mqtt else False
+        return {
+            "success":  success,
+            "action":   "play_music",
+            "response": f"Reproduciendo música en {device_id}." if success
+                        else f"No pude conectar con {device_id}.",
+            "data": {"device": device_id, "service": "spotify"},
+        }
+
+    async def _handle_media_control(self, match: re.Match) -> Dict[str, Any]:
+        """
+        Controla la reproducción multimedia (pause, next, prev, volumen).
+        Usa media keys del sistema operativo.
+        """
+        full_text   = match.group(0).lower().strip()
+        device_hint = match.group(1).strip() if match.lastindex >= 1 and match.group(1) else None
+        device_id   = self._resolve_device(device_hint)
+
+        if not device_id:
+            return {
+                "success":  False,
+                "action":   "media_control",
+                "response": "No hay dispositivos conectados.",
+                "data":     {},
+            }
+
+        # Determinar la acción de media según el texto capturado
+        if any(w in full_text for w in ("pausa", "para", "detén", "detiene")):
+            control = "pause"
+            response_text = "Pausando la música"
+        elif any(w in full_text for w in ("continua", "resume")):
+            control = "play"
+            response_text = "Continuando la música"
+        elif any(w in full_text for w in ("siguiente", "salta")):
+            control = "next"
+            response_text = "Siguiente canción"
+        elif any(w in full_text for w in ("anterior", "atrás")):
+            control = "prev"
+            response_text = "Canción anterior"
+        elif any(w in full_text for w in ("sube", "más")):
+            control = "volume_up"
+            response_text = "Subiendo volumen"
+        elif any(w in full_text for w in ("baja", "menos")):
+            control = "volume_down"
+            response_text = "Bajando volumen"
+        else:
+            control = "play_pause"
+            response_text = "Alternando reproducción"
+
+        command = {"action": "media_control", "control": control}
+        success = self.mqtt.publish_command(device_id, command) if self.mqtt else False
+
+        return {
+            "success":  success,
+            "action":   "media_control",
+            "response": f"{response_text} en {device_id}." if success
+                        else "No pude conectar con el dispositivo.",
+            "data": {"control": control, "device": device_id},
+        }
+
+    # ── Utilidades ────────────────────────────────────────────────────────────
 
     def get_history(self) -> list:
         """Retorna el historial de comandos procesados (últimos 50)."""
