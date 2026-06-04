@@ -709,13 +709,24 @@ class Orchestrator:
             import google.generativeai as genai
             genai.configure(api_key=api_key)
             
-            # Usar el modelo gemini-pro que es más compatible
-            model = genai.GenerativeModel(
-                'gemini-pro', 
-                system_instruction="Eres Nika, un asistente virtual de PC inteligente, amigable y muy conciso. Da respuestas muy breves y directas en español (1 o 2 oraciones máximo) porque vas a ser leída en voz alta por un sintetizador de voz. No uses asteriscos ni markdown."
+            prompt = (
+                "Eres Nika, un asistente virtual de PC inteligente, amigable y muy conciso. "
+                "Da respuestas muy breves y directas en español (1 o 2 oraciones máximo) "
+                "porque vas a ser leída en voz alta por un sintetizador de voz. "
+                "No uses asteriscos ni formato markdown.\n\n"
+                f"Usuario: {query}"
             )
-            # Ejecutar de forma síncrona en un hilo para no bloquear el loop asyncio, o simplemente directo
-            response = model.generate_content(query)
+            
+            try:
+                # Intentar con el modelo más rápido y moderno
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                response = model.generate_content(prompt)
+            except Exception as e:
+                logger.warning(f"[Orchestrator] gemini-1.5-flash falló ({e}), intentando con gemini-pro...")
+                # Fallback al modelo clásico si el SDK/región no soporta flash
+                model = genai.GenerativeModel('gemini-pro')
+                response = model.generate_content(prompt)
+                
             text_response = response.text.strip()
             
             # Limpiar posibles asteriscos residuales de markdown para que espeak no los lea
