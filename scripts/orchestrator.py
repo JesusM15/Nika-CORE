@@ -48,7 +48,7 @@ INTENT_PATTERNS: list[Tuple[str, re.Pattern]] = [
         re.IGNORECASE,
     )),
     ("cancel_reminder", re.compile(
-        r"(?:cancela|borra|elimina|quita)\s+(?:el\s+|la\s+|ese\s+|esa\s+)?(?:[uú]ltimo\s+)?(?:recordatorio|alarma|timer|temporizador)",
+        r"(?:cancela|borra|elimina|quita)\s+(?:el\s+|la\s+|ese\s+|esa\s+|mi\s+|mis\s+|tu\s+|tus\s+)?(?:[uú]ltimo\s+)?(?:recordatorio|alarma|timer|temporizador)",
         re.IGNORECASE,
     )),
 
@@ -707,42 +707,42 @@ class Orchestrator:
                     return rest, device
                 return phrase, None
 
-            params = {}
+            params = {"orig": normalized}
             if intent_name == "play_music":
                 clean = re.sub(r'^(?:reproduce|pon|toca|cancion|musica|música|spotify|escucha|escuchar)\s+', '', normalized)
                 clean, device = _extract_device(clean)
-                params = {"query": clean, "device": device}
+                params.update({"query": clean, "device": device})
             elif intent_name == "open_app":
                 clean = re.sub(r'^(?:abre|abrir|habre|inicia|ejecuta|lanza)\s+', '', normalized)
                 clean = re.sub(r'^(?:el|la|los|las|un|una)\s+', '', clean)
                 clean, device = _extract_device(clean)
-                params = {"app_name": clean, "device": device}
+                params.update({"app_name": clean, "device": device})
             elif intent_name == "close_app":
                 clean = re.sub(r'^(?:cierra|sierra|cerrar|apaga|quita|detiene|deten)\s+', '', normalized)
                 clean = re.sub(r'^(?:el|la|los|las|un|una)\s+', '', clean)
                 clean, device = _extract_device(clean)
-                params = {"app_name": clean, "device": device}
+                params.update({"app_name": clean, "device": device})
             elif intent_name == "web_search":
                 clean = re.sub(r'^(?:busca|buscar|googlea|investiga)\s+', '', normalized)
                 clean = re.sub(r'^(?:en google|en internet|en la web|algo sobre|sobre|de)\s+', '', clean)
                 clean, device = _extract_device(clean)
-                params = {"query": clean, "device": device}
+                params.update({"query": clean, "device": device})
             elif intent_name == "send_email":
                 to_match = re.search(r"\b(?:a|para)\s+([a-zA-Z0-9_\s.-]+)", normalized, re.IGNORECASE)
                 subj_match = re.search(r"\b(?:con asunto|asunto|sobre)\s+(.+)", normalized, re.IGNORECASE)
                 to = to_match.group(1).strip() if to_match else ""
                 subj = subj_match.group(1).strip() if subj_match else ""
-                params = {"to": to, "subject": subj}
+                params.update({"to": to, "subject": subj})
             elif intent_name == "set_reminder":
                 text, when_str = _split_reminder_text_and_time(normalized)
-                params = {"text": text, "when_str": when_str, "orig": normalized}
+                params.update({"text": text, "when_str": when_str})
             elif intent_name == "activate_mode":
                 clean = re.sub(r'^(?:activa|abre|inicia|lanza|pon|cambia)\s+', '', normalized)
                 clean = re.sub(r'^(?:el\s+)?modo\s+', '', clean)
                 clean, device = _extract_device(clean)
-                params = {"mode_name": clean, "device": device}
+                params.update({"mode_name": clean, "device": device})
             else:
-                params = {"query": normalized, "app_name": normalized, "text": normalized}
+                params.update({"query": normalized, "app_name": normalized, "text": normalized})
             return intent_name, params
 
         # FALLBACK a chat_ai
@@ -925,9 +925,9 @@ class Orchestrator:
                 },
             }
 
-    async def _handle_shutdown_device(self, match: re.Match) -> Dict[str, Any]:
+    async def _handle_shutdown_device(self, match: Any) -> Dict[str, Any]:
         """Envía un comando de apagado a un dispositivo remoto."""
-        device_hint = match.group(1).strip()
+        device_hint = _safe_group(match, 1)
         device_id   = self._resolve_device(device_hint)
 
         if not device_id:
@@ -1111,7 +1111,11 @@ class Orchestrator:
             query = query.replace(wrong, right)
             
         # Determinar si el usuario pidió un álbum, artista o canción
-        full_match = match.group(0).lower()
+        if isinstance(match, dict):
+            full_match = match.get("orig", "").lower()
+        else:
+            full_match = match.group(0).lower()
+            
         search_type = "track"
         if any(w in full_match for w in ("álbum", "album", "disco")):
             search_type = "album"

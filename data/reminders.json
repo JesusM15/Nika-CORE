@@ -24,6 +24,15 @@
       "when_ts": 1780607988.276102,
       "fired": false,
       "created": 1780607978.2761018
+    },
+    {
+      "id": 1780609233009,
+      "text": "Temporizador",
+      "when_str": "de cinco segundos",
+      "when_ts": 1780609238.008939,
+      "fired": true,
+      "created": 1780609233.0099397,
+      "fire_ts": 1780609262.6270099
     }
   ]
 }
