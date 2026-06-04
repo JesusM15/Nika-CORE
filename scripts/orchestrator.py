@@ -706,8 +706,9 @@ class Orchestrator:
             }
             
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=api_key)
+            from google import genai
+            
+            client = genai.Client(api_key=api_key)
             
             prompt = (
                 "Eres Nika, un asistente virtual de PC inteligente, amigable y muy conciso. "
@@ -717,15 +718,11 @@ class Orchestrator:
                 f"Usuario: {query}"
             )
             
-            try:
-                # Intentar con el modelo más rápido y moderno
-                model = genai.GenerativeModel('gemini-1.5-flash')
-                response = model.generate_content(prompt)
-            except Exception as e:
-                logger.warning(f"[Orchestrator] gemini-1.5-flash falló ({e}), intentando con gemini-pro...")
-                # Fallback al modelo clásico si el SDK/región no soporta flash
-                model = genai.GenerativeModel('gemini-pro')
-                response = model.generate_content(prompt)
+            # Usar la nueva API genai
+            response = client.models.generate_content(
+                model='gemini-1.5-flash',
+                contents=prompt,
+            )
                 
             text_response = response.text.strip()
             
@@ -740,9 +737,7 @@ class Orchestrator:
             }
             
         except ImportError:
-            import logging
-            logger = logging.getLogger("nika.orchestrator")
-            logger.error("[Orchestrator] Librería google-generativeai no instalada.")
+            logger.error("[Orchestrator] Librería google-genai no instalada.")
             return {
                 "success": False,
                 "action": "chat_ai",
@@ -750,8 +745,6 @@ class Orchestrator:
                 "data": {"query": query}
             }
         except Exception as e:
-            import logging
-            logger = logging.getLogger("nika.orchestrator")
             logger.error(f"[Orchestrator] Error en Gemini API: {e}")
             return {
                 "success": False,
