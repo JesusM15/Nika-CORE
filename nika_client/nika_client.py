@@ -182,6 +182,7 @@ class NikaClient:
             client.subscribe([
                 (f"nika/command/{HOSTNAME}", 1),   # Comandos directos a este equipo
                 ("nika/discovery/ping",      1),   # Broadcast de descubrimiento
+                ("nika/reminder/fire",       1),   # Canal de recordatorios y alarmas
             ])
             logger.info(f"[Client] Escuchando en: nika/command/{HOSTNAME}")
 
@@ -211,6 +212,8 @@ class NikaClient:
                 self._handle_discovery_ping()
             elif topic == f"nika/command/{HOSTNAME}":
                 self._handle_command(payload)
+            elif topic == "nika/reminder/fire":
+                self._handle_reminder_fire(payload)
             else:
                 logger.debug(f"[Client] Topic no manejado: {topic}")
 
@@ -242,6 +245,38 @@ class NikaClient:
         )
         avail = sum(1 for a in apps if a["available"])
         logger.info(f"[Client] Pong enviado. Apps disponibles: {avail}/{len(apps)}")
+
+    def _handle_reminder_fire(self, payload: dict):
+        """
+        Maneja el disparo de un recordatorio, alarma o temporizador.
+        Reproduce un sonido de alerta y habla usando el sintetizador nativo de Windows.
+        """
+        text = payload.get("text", "Recordatorio")
+        logger.info(f"[Client] 🔔 Recordatorio recibido: '{text}'")
+
+        # 1. Reproducir sonido de alerta de Windows
+        try:
+            import winsound
+            winsound.PlaySound("SystemQuestion", winsound.SND_ALIAS | winsound.SND_ASYNC)
+        except Exception as e:
+            logger.warning(f"[Client] No se pudo reproducir el sonido: {e}")
+
+        # 2. Sintetizar la voz en Windows usando PowerShell (Speech API nativa)
+        try:
+            if text.lower() in ("timer", "temporizador"):
+                speak_text = "El temporizador ha terminado."
+            elif text.lower() == "alarma":
+                speak_text = "La alarma está sonando."
+            else:
+                speak_text = f"Recordatorio: {text}."
+
+            import subprocess
+            # Escapar comillas simples en el texto para PowerShell
+            safe_text = speak_text.replace("'", "''")
+            cmd = f"Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('{safe_text}')"
+            subprocess.Popen(["powershell", "-Command", cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception as e:
+            logger.error(f"[Client] Error al sintetizar voz de recordatorio: {e}")
 
     def _handle_command(self, payload: dict):
         """

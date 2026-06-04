@@ -1,0 +1,20 @@
+{
+  "reminders": [
+    {
+      "id": 1780607334739,
+      "text": "sacar la basura",
+      "when_str": "en 10 minutos",
+      "when_ts": 1780607934.739931,
+      "fired": false,
+      "created": 1780607334.7399313
+    },
+    {
+      "id": 1780607334739,
+      "text": "Alarma",
+      "when_str": "mañana a las 8 de la noche",
+      "when_ts": 1780711200.0,
+      "fired": false,
+      "created": 1780607334.7399313
+    }
+  ]
+}

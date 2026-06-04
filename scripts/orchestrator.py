@@ -36,6 +36,22 @@ logger = logging.getLogger("nika.orchestrator")
 # ══════════════════════════════════════════════════════
 INTENT_PATTERNS: list[Tuple[str, re.Pattern]] = [
 
+    # ── RECORDATORIOS Y ALARMAS (prioridad alta para evitar conflictos con 'pon') ──
+    # Matches: "recuerdame la reunión a las 3", "pon alarma mañana 8", "que recordatorios tengo"
+    ("set_reminder", re.compile(
+        r"^(?:rec[uiu]erdame?|pon(?:me)?(?:\s+un[ao]?)?\s+(?:alarma|recordatorio|temporizador|timer)|agend[ae]|prog?r[ae]ma|avisa(?:me)?(?:\s+que)?|recordar|timer|temporizador)\b"
+        r"(.+)$",
+        re.IGNORECASE,
+    )),
+    ("list_reminders", re.compile(
+        r"(?:qu[eé]\s+recordatorios|mis\s+recordatorios|qu[eé]\s+tengo(?:\s+pendiente)?|lista\s+de\s+(?:alarmas|recordatorios|temporizadores|timers)|ver\s+alarmas|alarmas\s+pendientes|ver\s+timers|ver\s+temporizadores)",
+        re.IGNORECASE,
+    )),
+    ("cancel_reminder", re.compile(
+        r"(?:cancela|borra|elimina|quita)\s+(?:el\s+|la\s+|ese\s+|esa\s+)?(?:[uú]ltimo\s+)?(?:recordatorio|alarma|timer|temporizador)",
+        re.IGNORECASE,
+    )),
+
     # ── ACTIVAR MODO (prioridad máxima — evita conflicto con "abre") ───────────
     # Matches: "modo trabajo", "activa el modo gaming", "cambia a modo estudio en MSI"
     ("activate_mode", re.compile(
@@ -282,6 +298,14 @@ RESPONSES = {
             "Hubo un error al abrir el correo.",
         ],
     },
+    "reminder": {
+        "ok": [
+            "{message}",
+        ],
+        "fail": [
+            "{message}",
+        ],
+    },
     "system_status": {
         "ok": [
             "Todo funcionando bien. Estoy activa y lista.",
@@ -313,6 +337,43 @@ _fallback_idx = 0
 
 
 
+def _split_reminder_text_and_time(phrase: str) -> Tuple[str, str]:
+    """
+    Divide una frase en español en el texto del recordatorio y la especificación de tiempo.
+    Ejemplo: "sacar la basura en 10 minutos" -> ("sacar la basura", "en 10 minutos")
+             "timer de 5 minutos" -> ("", "de 5 minutos")
+    """
+    phrase = phrase.strip()
+    
+    # Expresiones para buscar el inicio de la especificación de tiempo en español
+    time_indicators = [
+        r'\ben\s+\d+',                      # "en 5 minutos"
+        r'\ba\s+las?\s+\d+',                # "a las 3", "a la 1"
+        r'\bpara\s+las?\s+\d+',            # "para las 5"
+        r'\bmañana\b',                     # "mañana", "mañana a las 8"
+        r'\bel\s+(?:lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo)\b', # "el lunes..."
+        r'\bde\s+\d+\s*(?:segundo|minuto|hora)' # "de 5 minutos", "de 10 segundos" (timers)
+    ]
+    
+    earliest_idx = len(phrase)
+    
+    for pattern in time_indicators:
+        match = re.search(pattern, phrase, re.IGNORECASE)
+        if match and match.start() < earliest_idx:
+            earliest_idx = match.start()
+            
+    if earliest_idx < len(phrase):
+        text = phrase[:earliest_idx].strip()
+        time_part = phrase[earliest_idx:].strip()
+        # Limpiar palabras conectoras residuales al inicio y final del texto (ej. "para", "de", "que", "a")
+        text = re.sub(r'^(?:para|de|a|que)\s+', '', text, flags=re.IGNORECASE).strip()
+        text = re.sub(r'\b(para|de|que|a)\b$', '', text, flags=re.IGNORECASE).strip()
+        return text, time_part
+    else:
+        return "", phrase
+
+
+
 class Orchestrator:
     """
     Cerebro central de Nika. Procesa texto transcrito y genera acciones MQTT.
@@ -333,6 +394,10 @@ class Orchestrator:
         self.mqtt        = mqtt_manager
         self.db_factory  = db_session_factory
         self._command_history: list[Dict[str, Any]] = []    # Últimos 50 comandos
+
+        # Inicializar servicio de recordatorios y alarmas
+        from scripts.reminders import get_reminder_service
+        self.reminders = get_reminder_service(mqtt_manager=mqtt_manager)
 
         logger.info("[Orchestrator] Inicializado y listo para procesar comandos.")
 
@@ -364,17 +429,20 @@ class Orchestrator:
         else:
             # Despachar al handler de la intención detectada
             handlers = {
-                "open_app":       self._handle_open_app,
-                "close_app":      self._handle_close_app,
-                "activate_mode":  self._handle_activate_mode,
-                "play_music":     self._handle_play_music,
-                "media_control":  self._handle_media_control,
-                "web_search":     self._handle_web_search,
-                "shutdown_device":self._handle_shutdown_device,
-                "scan_devices":   self._handle_scan_devices,
-                "system_status":  self._handle_system_status,
-                "send_email":     self._handle_send_email,
-                "chat_ai":        self._handle_chat_ai,
+                "open_app":        self._handle_open_app,
+                "close_app":       self._handle_close_app,
+                "activate_mode":   self._handle_activate_mode,
+                "play_music":      self._handle_play_music,
+                "media_control":   self._handle_media_control,
+                "web_search":      self._handle_web_search,
+                "shutdown_device": self._handle_shutdown_device,
+                "scan_devices":    self._handle_scan_devices,
+                "system_status":   self._handle_system_status,
+                "send_email":      self._handle_send_email,
+                "set_reminder":    self._handle_set_reminder,
+                "list_reminders":  self._handle_list_reminders,
+                "cancel_reminder": self._handle_cancel_reminder,
+                "chat_ai":         self._handle_chat_ai,
             }
             handler = handlers.get(intent)
             if handler:
@@ -1009,6 +1077,88 @@ class Orchestrator:
             "response": f"{response_text} en {device_id}." if success
                         else "No pude conectar con el dispositivo.",
             "data": {"control": control, "device": device_id},
+        }
+
+    # ── Recordatorios, Alarmas y Temporizadores ────────────────────────────────
+
+    async def _handle_set_reminder(self, match: re.Match) -> Dict[str, Any]:
+        """Programa un recordatorio, alarma o temporizador."""
+        phrase = match.group(1).strip()
+        text, when_str = _split_reminder_text_and_time(phrase)
+        
+        # Si no hay texto, deducimos el tipo (Temporizador, Alarma, Recordatorio)
+        orig = match.group(0).lower()
+        if not text:
+            if "timer" in orig or "temporizador" in orig:
+                text = "Temporizador"
+            elif "alarma" in orig:
+                text = "Alarma"
+            else:
+                text = "Recordatorio"
+                
+        res = self.reminders.add(text=text, when_str=when_str)
+        return {
+            "success": res["ok"],
+            "action": "set_reminder",
+            "response": res["message"],
+            "data": {"text": text, "when": res.get("when")} if res["ok"] else {}
+        }
+
+    async def _handle_list_reminders(self, match: re.Match) -> Dict[str, Any]:
+        """Lista los próximos recordatorios, alarmas y temporizadores."""
+        from datetime import datetime
+        upcoming = self.reminders.list_upcoming(limit=5)
+        if not upcoming:
+            return {
+                "success": True,
+                "action": "list_reminders",
+                "response": "No tienes recordatorios ni temporizadores pendientes.",
+                "data": {"reminders": []}
+            }
+            
+        phrases = []
+        now = datetime.now()
+        for r in upcoming:
+            dt = datetime.fromtimestamp(r["when_ts"])
+            diff_secs = int(r["when_ts"] - now.timestamp())
+            
+            # Formato premium para leer en voz alta
+            if r["text"].lower() in ("timer", "temporizador"):
+                if diff_secs < 60:
+                    time_desc = f"un temporizador al que le quedan {diff_secs} segundos"
+                elif diff_secs < 3600:
+                    mins = diff_secs // 60
+                    time_desc = f"un temporizador al que le quedan {mins} minuto{'s' if mins > 1 else ''}"
+                else:
+                    horas = diff_secs // 3600
+                    time_desc = f"un temporizador al que le quedan {horas} hora{'s' if horas > 1 else ''}"
+                phrases.append(time_desc)
+            elif r["text"].lower() == "alarma":
+                phrases.append(f"una alarma hoy a las {dt.strftime('%H:%M')}")
+            else:
+                dia = "hoy" if dt.date() == now.date() else "el " + dt.strftime("%d/%m")
+                phrases.append(f"'{r['text']}' {dia} a las {dt.strftime('%H:%M')}")
+                
+        if len(phrases) == 1:
+            resp = f"Tienes un recordatorio pendiente: {phrases[0]}."
+        else:
+            resp = f"Tienes {len(phrases)} recordatorios pendientes: " + ", ".join(phrases[:-1]) + " y " + phrases[-1] + "."
+            
+        return {
+            "success": True,
+            "action": "list_reminders",
+            "response": resp,
+            "data": {"reminders": upcoming}
+        }
+
+    async def _handle_cancel_reminder(self, match: re.Match) -> Dict[str, Any]:
+        """Cancela el recordatorio, alarma o temporizador más cercano."""
+        res = self.reminders.cancel_last()
+        return {
+            "success": res["ok"],
+            "action": "cancel_reminder",
+            "response": res["message"],
+            "data": {}
         }
 
     # ── Utilidades ────────────────────────────────────────────────────────────
