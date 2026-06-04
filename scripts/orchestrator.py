@@ -636,22 +636,24 @@ class Orchestrator:
         """
         normalized = text.lower().strip()
         KEYWORD_INTENTS: list[Tuple[str, list[str]]] = [
-            ("play_music",    ["reproduce", "reproducir", "pon", "toca", "cancion", "musica",
-                               "música", "cancio", "spotify", "artista", "album", "disco",
-                               "escucha", "escuchar", "pista", "rola", "cantar", "canta"]),
-            ("media_control", ["pausa", "pausar", "para", "silencio", "callate", "detén",
-                               "siguiente", "salta", "anterior", "atras", "sube", "baja",
-                               "volumen", "continua", "reanuda", "resume", "play"]),
-            ("open_app",      ["abre", "abrir", "habre", "arranca", "arrancame", "inicia",
-                               "ejecuta", "lanza", "enciende", "muestra"]),
-            ("close_app",     ["cierra", "sierra", "cerrar", "mata", "quita", "detiene",
-                               "apaga", "termina"]),
-            ("send_email",    ["correo", "email", "e-mail", "mensaje", "redacta", "escribe",
-                               "manda", "envia", "envía", "mándame", "mandame"]),
-            ("web_search",    ["busca", "buscar", "busco", "googlea", "investiga", "google",
-                               "busqueda", "búsqueda", "internet"]),
-            ("system_status", ["estado", "estatus", "como estas", "cómo estás", "status",
-                               "informe", "estas ahi", "estás ahí"]),
+            ("cancel_reminder", ["cancela", "borra", "elimina", "quita"]),
+            ("list_reminders",  ["lista", "listado", "ver", "pendientes", "tengo", "cuales"]),
+            ("set_reminder",    ["timer", "temporizador", "alarma", "recordatorio", "recuerdame",
+                                 "recuerda", "avisa", "avisame", "programa", "agende"]),
+            ("activate_mode",   ["modo", "trabajo", "gaming", "estudio"]),
+            ("close_app",       ["cierra", "sierra", "cerrar", "mata", "quita", "detiene",
+                                 "apaga", "termina"]),
+            ("open_app",        ["abre", "abrir", "habre", "arranca", "arrancame", "inicia",
+                                 "ejecuta", "lanza", "enciende", "muestra"]),
+            ("send_email",      ["correo", "email", "e-mail", "mensaje", "redacta", "escribe",
+                                 "manda", "envia", "envía", "mándame", "mandame"]),
+            ("web_search",      ["busca", "buscar", "busco", "googlea", "investiga", "google",
+                                 "busqueda", "búsqueda", "internet"]),
+            ("system_status",   ["estado", "estatus", "como estas", "cómo estás", "status",
+                                 "informe", "estas ahi", "estás ahí"]),
+            ("play_music",      ["reproduce", "reproducir", "pon", "toca", "cancion", "musica",
+                                 "música", "cancio", "spotify", "artista", "album", "disco",
+                                 "escucha", "escuchar", "pista", "rola", "cantar", "canta"]),
         ]
 
         def _fuzzy_in(word: str, candidates: list[str], threshold: float = 0.78) -> bool:
@@ -680,25 +682,72 @@ class Orchestrator:
             return prev[-1]
 
         tokens = normalized.split()
-        for intent_name, keywords in KEYWORD_INTENTS:
+        intent_name = None
+        for intent_cand, keywords in KEYWORD_INTENTS:
             for token in tokens:
                 if len(token) < 3:
                     continue
                 if _fuzzy_in(token, keywords):
+                    intent_name = intent_cand
                     logger.info(
                         f"[Orchestrator] ⚡ Semántica salvó '{intent_name}': "
                         f"token='{token}' en texto='{normalized}'"
                     )
-                    # dummy_match
-                    dummy_pattern = re.compile(r"^(.*?)()$", re.IGNORECASE)
-                    dummy_match = dummy_pattern.match(normalized)
-                    return intent_name, dummy_match
+                    break
+            if intent_name:
+                break
+
+        if intent_name:
+            # Helper para extraer dispositivo
+            def _extract_device(phrase: str) -> Tuple[str, Optional[str]]:
+                match_dev = re.search(r"\s+en\s+([a-zA-Z0-9_-]+)$", phrase, re.IGNORECASE)
+                if match_dev:
+                    device = match_dev.group(1).strip()
+                    rest = phrase[:match_dev.start()].strip()
+                    return rest, device
+                return phrase, None
+
+            params = {}
+            if intent_name == "play_music":
+                clean = re.sub(r'^(?:reproduce|pon|toca|cancion|musica|música|spotify|escucha|escuchar)\s+', '', normalized)
+                clean, device = _extract_device(clean)
+                params = {"query": clean, "device": device}
+            elif intent_name == "open_app":
+                clean = re.sub(r'^(?:abre|abrir|habre|inicia|ejecuta|lanza)\s+', '', normalized)
+                clean = re.sub(r'^(?:el|la|los|las|un|una)\s+', '', clean)
+                clean, device = _extract_device(clean)
+                params = {"app_name": clean, "device": device}
+            elif intent_name == "close_app":
+                clean = re.sub(r'^(?:cierra|sierra|cerrar|apaga|quita|detiene|deten)\s+', '', normalized)
+                clean = re.sub(r'^(?:el|la|los|las|un|una)\s+', '', clean)
+                clean, device = _extract_device(clean)
+                params = {"app_name": clean, "device": device}
+            elif intent_name == "web_search":
+                clean = re.sub(r'^(?:busca|buscar|googlea|investiga)\s+', '', normalized)
+                clean = re.sub(r'^(?:en google|en internet|en la web|algo sobre|sobre|de)\s+', '', clean)
+                clean, device = _extract_device(clean)
+                params = {"query": clean, "device": device}
+            elif intent_name == "send_email":
+                to_match = re.search(r"\b(?:a|para)\s+([a-zA-Z0-9_\s.-]+)", normalized, re.IGNORECASE)
+                subj_match = re.search(r"\b(?:con asunto|asunto|sobre)\s+(.+)", normalized, re.IGNORECASE)
+                to = to_match.group(1).strip() if to_match else ""
+                subj = subj_match.group(1).strip() if subj_match else ""
+                params = {"to": to, "subject": subj}
+            elif intent_name == "set_reminder":
+                text, when_str = _split_reminder_text_and_time(normalized)
+                params = {"text": text, "when_str": when_str, "orig": normalized}
+            elif intent_name == "activate_mode":
+                clean = re.sub(r'^(?:activa|abre|inicia|lanza|pon|cambia)\s+', '', normalized)
+                clean = re.sub(r'^(?:el\s+)?modo\s+', '', clean)
+                clean, device = _extract_device(clean)
+                params = {"mode_name": clean, "device": device}
+            else:
+                params = {"query": normalized, "app_name": normalized, "text": normalized}
+            return intent_name, params
 
         # FALLBACK a chat_ai
         logger.warning(f"[Orchestrator] Sin intent estructurado local ni semántico → chat_ai: '{text}'")
-        chat_pattern = re.compile(r"^(.*?)()$", re.IGNORECASE)
-        chat_match = chat_pattern.match(normalized)
-        return "chat_ai", chat_match
+        return "chat_ai", {"query": text}
 
 
 
