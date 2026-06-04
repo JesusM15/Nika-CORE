@@ -392,7 +392,7 @@ class NikaClient:
                     sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
                         client_id=client_id,
                         client_secret=client_secret,
-                        redirect_uri=os.getenv("SPOTIPY_REDIRECT_URI", "http://localhost:8888/callback"),
+                        redirect_uri=os.getenv("SPOTIPY_REDIRECT_URI", "http://127.0.0.1:8888/callback"),
                         scope="user-modify-playback-state user-read-playback-state"
                     ))
                     
@@ -414,19 +414,64 @@ class NikaClient:
                     
                     if device_id:
                         if query:
-                            # Buscar track, album o artista
-                            results = sp.search(q=query, limit=1, type='track,album,artist')
-                            uri_to_play = None
+                            import re
+                            import difflib
                             
-                            if results['tracks']['items']:
-                                uri_to_play = results['tracks']['items'][0]['uri']
-                            elif results['albums']['items']:
-                                uri_to_play = results['albums']['items'][0]['uri']
-                            elif results['artists']['items']:
-                                uri_to_play = results['artists']['items'][0]['uri']
+                            uri_to_play = None
+                            is_track = False
+                            
+                            # ── Búsqueda Inteligente (Fuzzy matching por artista) ──
+                            # Si el usuario dice "cancionX de artistaY"
+                            match_artist = re.search(r"(.+)\s+(?:de|por|del artista)\s+(.+)", query, re.IGNORECASE)
+                            if match_artist:
+                                song_guess = match_artist.group(1).strip()
+                                artist_guess = match_artist.group(2).strip()
+                                logger.info(f"[Client] Smart Search -> Canción: '{song_guess}', Artista: '{artist_guess}'")
+                                
+                                art_results = sp.search(q=artist_guess, limit=1, type='artist')
+                                if art_results['artists']['items']:
+                                    artist_id = art_results['artists']['items'][0]['id']
+                                    artist_name = art_results['artists']['items'][0]['name']
+                                    logger.info(f"[Client] Encontrado artista: {artist_name}")
+                                    
+                                    # Obtener top tracks y albums
+                                    top_tracks = sp.artist_top_tracks(artist_id)['tracks']
+                                    albums = sp.artist_albums(artist_id, album_type='album,single', limit=20)['items']
+                                    
+                                    candidates = [(t['name'], t['uri'], True) for t in top_tracks]
+                                    candidates += [(a['name'], a['uri'], False) for a in albums]
+                                    
+                                    # Fuzzy match
+                                    best_ratio = 0
+                                    
+                                    for name, uri, is_tr in candidates:
+                                        # Comparamos la transcripción errónea con el nombre real
+                                        ratio = difflib.SequenceMatcher(None, song_guess.lower(), name.lower()).ratio()
+                                        if ratio > best_ratio:
+                                            best_ratio = ratio
+                                            uri_to_play = uri
+                                            is_track = is_tr
+                                            best_match_name = name
+                                            
+                                    if best_ratio > 0.3:
+                                        logger.info(f"[Client] ✓ Fuzzy Match! '{song_guess}' ≈ '{best_match_name}' (Ratio: {best_ratio:.2f})")
+                                    else:
+                                        uri_to_play = None # Fallback a búsqueda normal
+                            
+                            # ── Búsqueda Normal (Fallback) ──
+                            if not uri_to_play:
+                                results = sp.search(q=query, limit=1, type='track,album,artist')
+                                if results['tracks']['items']:
+                                    uri_to_play = results['tracks']['items'][0]['uri']
+                                    is_track = True
+                                elif results['albums']['items']:
+                                    uri_to_play = results['albums']['items'][0]['uri']
+                                    is_track = False
+                                elif results['artists']['items']:
+                                    uri_to_play = results['artists']['items'][0]['uri']
+                                    is_track = False
                                 
                             if uri_to_play:
-                                is_track = 'track' in uri_to_play
                                 sp.start_playback(
                                     device_id=device_id, 
                                     uris=[uri_to_play] if is_track else None,

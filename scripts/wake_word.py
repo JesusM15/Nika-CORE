@@ -65,7 +65,7 @@ SAMPLE_RATE  = 16000     # Hz (Requerido por Vosk internamente)
 HARDWARE_SAMPLE_RATE = int(os.getenv("HARDWARE_SAMPLE_RATE", "16000")) # Tasa física del mic
 
 CHUNK_SIZE   = int(os.getenv("CHUNK_SIZE", "4000"))      # Frames por chunk (4000=0.25s, más responsivo)
-N_CHANNELS   = int(os.getenv("HARDWARE_CHANNELS", "1"))   # Canales físicos (mono>>>>>>> e2ab4b6a7c169e9ea865dbb813700086aec41c66
+N_CHANNELS   = int(os.getenv("HARDWARE_CHANNELS", "1"))   # Canales físicos (mono=1, estéreo=2)
 
 # Segundos de audio a grabar DESPUÉS de detectar la keyword
 COMMAND_RECORD_SECS = float(os.getenv("COMMAND_RECORD_SECS", "5.0"))

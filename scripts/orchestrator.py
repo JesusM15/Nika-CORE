@@ -37,11 +37,10 @@ logger = logging.getLogger("nika.orchestrator")
 INTENT_PATTERNS: list[Tuple[str, re.Pattern]] = [
 
     # ── ACTIVAR MODO (prioridad máxima — evita conflicto con "abre") ───────────
-    # Matches: "modo trabajo", "activa el modo gaming", "abre modo estudio en MSI"
-    # group(1) = nombre del modo, group(2) = hint de dispositivo (opcional)
+    # Matches: "modo trabajo", "activa el modo gaming", "cambia a modo estudio en MSI"
     ("activate_mode", re.compile(
         r"(?:"
-        r"(?:activa|abre|inicia|lanza)(?:\s+(?:el\s+)?)?"
+        r"(?:activa|abre|inicia|lanza|pon|enciende|cambia\s+a|ejecuta)(?:\s+(?:el\s+)?)?"
         r"modo\s+"
         r"|(?:^|\s)modo\s+"
         r")(.+?)(?:\s+en\s+(.+))?$",
@@ -49,74 +48,75 @@ INTENT_PATTERNS: list[Tuple[str, re.Pattern]] = [
     )),
 
     # ── CONTROL DE MÚSICA (antes de open_app para que "pon música" no abra "música") ─
-    # Matches: "pon música", "reproduce música en MSI", "reproduce taylor swift"
+    # Matches: "pon música", "reproduce una cancion de taylor", "quiero escuchar a the weeknd"
     ("play_music", re.compile(
-        r"(?:pon(?:me)?|reproduce|ponme|echa|lanza)\s+"
-        r"(?:(?:la\s+)?m[uú]sica|la\s+canci[oó]n\s+de|la\s+canci[oó]n|el\s+[aá]lbum|el\s+artista)?\s*"
+        r"(?:pon(?:me)?|reproduce|reprod[uú]ceme|toca|lanza|escuchar|quiero\s+escuchar)\s+"
+        r"(?:(?:la\s+|una\s+)?(?:m[uú]sica|canci[oó]n|pista|rola)(?:\s+de)?|(?:el\s+|un\s+)?(?:[aá]lbum|disco)|(?:el\s+|un\s+)?artista|a\s+)?\s*"
         r"(.*?)"
         r"(?:\s+en\s+(.+))?$",
         re.IGNORECASE,
     )),
 
     # ── CONTROL MULTIMEDIA (pausa, siguiente, volumen) ────────────────────────
-    # Matches: "pausa la música", "siguiente canción", "sube el volumen"
+    # Matches: "pausa", "callate", "siguiente", "otra", "subele al volumen", "reanuda la cancion"
     ("media_control", re.compile(
         r"(?:"
-        r"(?:pausa|para|detiene?)(?:\s+(?:la\s+)?m[uú]sica)?"
-        r"|(?:siguiente|salta(?:\s+la)?)\s+(?:canci[oó]n|pista|track)"
-        r"|(?:anterior|atr[aá]s)\s+(?:canci[oó]n|pista|track)"
-        r"|(?:sube|baja|m[aá]s|menos)\s+(?:el\s+)?volumen"
-        r"|continua(?:\s+(?:la\s+)?m[uú]sica)?"
-        r"|resume(?:\s+(?:la\s+)?m[uú]sica)?"
+        r"(?:pausa|para|det[eé]n|detiene|c[aá]llate|silencio|ponle\s+pausa|desactiva)"
+        r"|(?:siguiente|salta|otra|cambia|p[aá]sala)"
+        r"|(?:anterior|atr[aá]s|regresa|vuelve)"
+        r"|(?:sube|baja|m[aá]s|menos|s[uú]bele|b[aá]jale)"
+        r"|(?:contin[uú]a|resume|reanuda|despausa|dale\s+play|qu[ií]tale\s+la\s+pausa|reproduce)"
         r")"
+        r"(?:\s+(?:la\s+|el\s+)?(?:m[uú]sica|canci[oó]n|pista|track|rola|volumen|lo|la))*"
         r"(?:\s+en\s+(.+))?$",
         re.IGNORECASE,
     )),
 
     # ── ABRIR APLICACIÓN ───────────────────────────────────────────────────────
-    # Matches: "abre spotify", "inicia word en laptop-01", "lanza chrome"
+    # Matches: "abreme spotify", "arranca word", "muestrame el navegador"
     ("open_app", re.compile(
-        r"(?:abre?|inicia|ejecuta|lanza|pon|enciende)\s+(.+?)(?:\s+en\s+(.+))?$",
+        r"(?:[aá]bre(?:me)?|inicia|ejecuta|lanza|pon(?:me)?|enciende|arranca|mu[eé]strame)\s+(.+?)(?:\s+en\s+(.+))?$",
         re.IGNORECASE,
     )),
 
     # ── CERRAR APLICACIÓN ──────────────────────────────────────────────────────
-    # Matches: "cierra spotify", "cierra chrome en mi laptop"
+    # Matches: "cierrame spotify", "quita chrome", "apaga el juego"
     ("close_app", re.compile(
-        r"(?:cierra|detiene?|para|mata)\s+(.+?)(?:\s+en\s+(.+))?$",
+        r"(?:cierra(?:me)?|det[eé]n|detiene|para|mata|quita|apaga)\s+(.+?)(?:\s+en\s+(.+))?$",
         re.IGNORECASE,
     )),
 
     # ── APAGAR DISPOSITIVO ─────────────────────────────────────────────────────
-    # Matches: "apaga el laptop", "apaga mi pc"
+    # Matches: "apaga el laptop", "suspende mi pc"
     ("shutdown_device", re.compile(
-        r"(?:apaga|apagar|shutdown)\s+(?:(?:el|mi|la)\s+)?(.+)$",
+        r"(?:apaga(?:me)?|apagar|shutdown|suspende)\s+(?:(?:el|mi|la)\s+)?(.+)$",
         re.IGNORECASE,
     )),
 
     # ── ESCANEAR DISPOSITIVOS ──────────────────────────────────────────────────
-    # Matches: "qué dispositivos hay", "escanea la red", "busca dispositivos"
+    # Matches: "qué dispositivos hay", "actualiza dispositivos"
     ("scan_devices", re.compile(
         r"(?:qu[eé]\s+dispositivos|escanea(?:\s+(?:la\s+)?red)?|"
         r"busca\s+dispositivos|dispositivos\s+disponibles|"
-        r"qué\s+hay\s+conectado)",
+        r"qu[eé]\s+hay\s+conectado|actualiza\s+dispositivos)",
         re.IGNORECASE,
     )),
 
     # ── BÚSQUEDA WEB ───────────────────────────────────────────────────────────
-    # Matches: "busca en google recetas", "busca recetas en internet"
+    # Matches: "busca en google recetas", "googlea sobre perros", "investiga"
     ("web_search", re.compile(
-        r"(?:busca|buscar)\s+(?:en\s+(?:google|internet|la\s+web)\s+)?"
+        r"(?:b[uú]sca(?:me)?|buscar|b[uú]scalo|investiga(?:me)?|googlea)\s+"
+        r"(?:(?:algo\s+)?(?:en\s+)?(?:google|internet|la\s+web)\s+(?:sobre\s+|de\s+)?)?"
         r"(.*?)"
         r"(?:\s+en\s+(.+))?$",
         re.IGNORECASE,
     )),
 
     # ── ESTADO DEL SISTEMA ─────────────────────────────────────────────────────
-    # Matches: "cómo estás", "estado del sistema", "qué estás haciendo"
+    # Matches: "cómo estás", "estás ahí", "estado del sistema"
     ("system_status", re.compile(
         r"(?:c[oó]mo\s+est[aá]s|estado(?:\s+del\s+sistema)?|"
-        r"qu[eé]\s+est[aá]s\s+haciendo|informe|status)",
+        r"qu[eé]\s+est[aá]s\s+haciendo|informe|status|est[aá]s\s+ah[ií])",
         re.IGNORECASE,
     )),
 ]
@@ -545,6 +545,25 @@ class Orchestrator:
           group(2) → hint del dispositivo, opcional (ej. "MSI")
         """
         query       = match.group(1).strip() if match.group(1) else ""
+        
+        # ── Corrección Fonética (Spanglish) ───────────────────────────────────
+        # El modelo Vosk en español fuerza las palabras en inglés a sonar como español.
+        # Aquí mapeamos los errores más comunes para que Spotify los entienda.
+        phonetic_map = {
+            "way destruir": "wildest dreams",
+            "fieles": "fearless",
+            "reputación": "reputation",
+            "cruel somer": "cruel summer",
+            "loc history": "love story",
+            "lo que stori": "love story",
+            "sheik it off": "shake it off",
+            "blank space": "blank space",
+            "bad blod": "bad blood",
+            "yugilón wimi": "you belong with me"
+        }
+        for wrong, right in phonetic_map.items():
+            query = query.replace(wrong, right)
+            
         device_hint = match.group(2).strip() if match.group(2) else None
         device_id   = self._resolve_device(device_hint)
 
