@@ -25,6 +25,7 @@ import os
 import sys
 import json
 import time
+import ctypes
 import socket
 import platform
 import subprocess
@@ -256,11 +257,13 @@ class NikaClient:
         action = payload.get("action", "").lower()
 
         action_map = {
-            "open_app":  self._open_app,
-            "close_app": self._close_app,
-            "shutdown":  self._handle_shutdown,
-            "rescan":    self._handle_rescan,
-            "ping":      lambda p: self._publish_status("online"),
+            "open_app":      self._open_app,
+            "close_app":     self._close_app,
+            "play_music":    self._play_music,
+            "media_control": self._media_control,
+            "shutdown":      self._handle_shutdown,
+            "rescan":        self._handle_rescan,
+            "ping":          lambda p: self._publish_status("online"),
         }
 
         handler = action_map.get(action)
@@ -363,6 +366,105 @@ class NikaClient:
         total = discover_apps(self.db)
         logger.info(f"[Client] Re-escaneo completo: {total} apps en BD")
         self._publish_apps()    # Notificar a Nika Core con la lista actualizada
+
+    def _play_music(self, payload: dict):
+        """
+        Abre Spotify y reproduce música.
+
+        Usa el protocolo URI de Spotify para abrir la app directamente.
+        Si Spotify ya está corriendo, el URI navega sin abrir otra instancia.
+        """
+        service = payload.get("service", "spotify")
+        logger.info(f"[Client] 🎵 Reproduciendo música via {service}")
+
+        if service == "spotify":
+            try:
+                # Paso 1: Intentar abrir Spotify via URI protocol
+                # Este comando abre Spotify y (si Premium) reproduce la última sesión
+                subprocess.Popen(
+                    ["cmd", "/c", "start", "spotify:"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                logger.info("[Client] ✓ Spotify abierto via URI protocol")
+
+                # Paso 2: Esperar a que Spotify arranque y enviar Play
+                time.sleep(3)
+                self._send_media_key("play_pause")
+                logger.info("[Client] ✓ Play enviado a Spotify")
+
+                self._publish_status("online", event="music:spotify:playing")
+
+            except Exception as e:
+                logger.error(f"[Client] ✗ Error abriendo Spotify: {e}")
+                # Fallback: intentar abrir via la BD de apps
+                app = self.db.resolve("spotify")
+                if app:
+                    launch_app(app)
+                    time.sleep(3)
+                    self._send_media_key("play_pause")
+        else:
+            logger.warning(f"[Client] Servicio de música no soportado: {service}")
+
+    def _media_control(self, payload: dict):
+        """
+        Controla la reproducción multimedia usando media keys de Windows.
+
+        Usa ctypes para enviar virtual key events al sistema operativo.
+        Funciona con cualquier reproductor que respete las media keys
+        del sistema (Spotify, VLC, Windows Media Player, etc.).
+
+        Controles soportados:
+          play_pause  → VK_MEDIA_PLAY_PAUSE (0xB3)
+          play        → VK_MEDIA_PLAY_PAUSE (0xB3)
+          pause       → VK_MEDIA_PLAY_PAUSE (0xB3)
+          next        → VK_MEDIA_NEXT_TRACK (0xB0)
+          prev        → VK_MEDIA_PREV_TRACK (0xB1)
+          stop        → VK_MEDIA_STOP (0xB2)
+          volume_up   → VK_VOLUME_UP (0xAF)
+          volume_down → VK_VOLUME_DOWN (0xAE)
+          mute        → VK_VOLUME_MUTE (0xAD)
+        """
+        control = payload.get("control", "play_pause")
+        logger.info(f"[Client] 🎵 Media control: {control}")
+
+        self._send_media_key(control)
+        self._publish_status("online", event=f"media:{control}")
+
+    @staticmethod
+    def _send_media_key(control: str):
+        """
+        Envía un virtual key event de media al sistema operativo Windows.
+
+        Usa la API keybd_event de user32.dll para simular la pulsación
+        de las teclas multimedia del teclado.
+        """
+        # Mapa de controles → Virtual Key codes de Windows
+        VK_MAP = {
+            "play_pause":  0xB3,   # VK_MEDIA_PLAY_PAUSE
+            "play":        0xB3,   # VK_MEDIA_PLAY_PAUSE (toggle)
+            "pause":       0xB3,   # VK_MEDIA_PLAY_PAUSE (toggle)
+            "next":        0xB0,   # VK_MEDIA_NEXT_TRACK
+            "prev":        0xB1,   # VK_MEDIA_PREV_TRACK
+            "stop":        0xB2,   # VK_MEDIA_STOP
+            "volume_up":   0xAF,   # VK_VOLUME_UP
+            "volume_down": 0xAE,   # VK_VOLUME_DOWN
+            "mute":        0xAD,   # VK_VOLUME_MUTE
+        }
+
+        vk_code = VK_MAP.get(control)
+        if vk_code is None:
+            logger.warning(f"[Client] Media key desconocida: {control}")
+            return
+
+        try:
+            # KEYEVENTF_EXTENDEDKEY = 0x0001, KEYEVENTF_KEYUP = 0x0002
+            ctypes.windll.user32.keybd_event(vk_code, 0, 0x0001, 0)        # Key down
+            time.sleep(0.05)
+            ctypes.windll.user32.keybd_event(vk_code, 0, 0x0001 | 0x0002, 0)  # Key up
+            logger.info(f"[Client] ✓ Media key enviada: {control} (VK=0x{vk_code:02X})")
+        except Exception as e:
+            logger.error(f"[Client] ✗ Error enviando media key: {e}")
 
     # ── Publicaciones MQTT ────────────────────────────────────────────────────
 
