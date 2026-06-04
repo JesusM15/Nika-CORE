@@ -102,6 +102,13 @@ INTENT_PATTERNS: list[Tuple[str, re.Pattern]] = [
         re.IGNORECASE,
     )),
 
+    # ── REDACTAR EMAIL ─────────────────────────────────────────────────────────
+    # Matches: "redacta un correo a juan", "escribe un email"
+    ("send_email", re.compile(
+        r"(?:(?:puedes\s+|podr[ií]as\s+|quiero\s+(?:que\s+)?|por\s+favor\s+)?(?:redacta(?:me)?|escribe|manda|env[ií]a)(?:\s+un)?\s+(?:correo|email|e-mail))(?:\s+a\s+(.+?))?(?:\s+(?:con\s+el\s+)?asunto\s+(.+))?$",
+        re.IGNORECASE,
+    )),
+
     # ── BÚSQUEDA WEB ───────────────────────────────────────────────────────────
     # Matches: "busca en google recetas", "googlea sobre perros", "investiga"
     ("web_search", re.compile(
@@ -197,6 +204,7 @@ class Orchestrator:
                 "shutdown_device":self._handle_shutdown_device,
                 "scan_devices":   self._handle_scan_devices,
                 "system_status":  self._handle_system_status,
+                "send_email":     self._handle_send_email,
                 "chat_ai":        self._handle_chat_ai,
             }
             handler = handlers.get(intent)
@@ -652,6 +660,26 @@ class Orchestrator:
             "response": f"Buscando {query} en {device_id}." if success
                         else f"No pude conectar con {device_id}.",
             "data": {"query": query, "device": device_id},
+        }
+
+    async def _handle_send_email(self, match: re.Match) -> Dict[str, Any]:
+        """Abre el cliente de correo predeterminado para redactar un email."""
+        recipient = match.group(1).strip() if match.group(1) else ""
+        subject = match.group(2).strip() if match.group(2) else ""
+        device_id = self._resolve_device(None)
+        
+        command = {"action": "send_email", "to": recipient, "subject": subject}
+        success = self.mqtt.publish_command(device_id, command) if self.mqtt else False
+        
+        tts = "Abriendo el cliente de correo"
+        if recipient:
+            tts += f" para {recipient}"
+            
+        return {
+            "success": success,
+            "action": "send_email",
+            "response": f"{tts} en {device_id}." if success else "No hay dispositivos conectados.",
+            "data": {"to": recipient, "subject": subject}
         }
 
     async def _handle_media_control(self, match: re.Match) -> Dict[str, Any]:

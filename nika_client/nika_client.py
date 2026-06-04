@@ -262,6 +262,7 @@ class NikaClient:
             "play_music":    self._play_music,
             "media_control": self._media_control,
             "web_search":    self._web_search,
+            "send_email":    self._send_email,
             "shutdown":      self._handle_shutdown,
             "rescan":        self._handle_rescan,
             "ping":          lambda p: self._publish_status("online"),
@@ -532,6 +533,24 @@ class NikaClient:
             url = f"https://www.google.com/search?q={safe_query}"
             subprocess.Popen(["cmd", "/c", "start", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             self._publish_status("online", event="web_search")
+
+    def _send_email(self, payload: dict):
+        """Abre el cliente de correo predeterminado para redactar un email."""
+        to = payload.get("to", "")
+        subject = payload.get("subject", "")
+        
+        logger.info(f"[Client] ✉️ Redactando email a: '{to}' con asunto: '{subject}'")
+        
+        import urllib.parse
+        # Construir URI mailto
+        uri = "mailto:"
+        if to:
+            uri += urllib.parse.quote(to)
+        if subject:
+            uri += f"?subject={urllib.parse.quote(subject)}"
+            
+        subprocess.Popen(["cmd", "/c", "start", uri], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self._publish_status("online", event="email:draft")
 
     def _media_control(self, payload: dict):
         """

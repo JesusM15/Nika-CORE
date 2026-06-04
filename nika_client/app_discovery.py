@@ -204,6 +204,9 @@ SEED_APPS: list[tuple] = [
     ("taskmgr",    "Administrador de Tareas","Taskmgr.exe", "system",  ["taskmgr.exe"]),
     ("cmd",        "Símbolo del Sistema",  "cmd.exe",       "system",  ["cmd.exe"]),
     ("powershell", "PowerShell",           "powershell.exe","system",  ["powershell.exe"]),
+    ("virtualbox", "VirtualBox",           "VirtualBox.exe","system",  [
+        r"%PROGRAMFILES%\Oracle\VirtualBox\VirtualBox.exe",
+    ]),
 
     # ── Multimedia ─────────────────────────────────────────────────────────────
     ("spotify",    "Spotify",              "Spotify.exe",   "multimedia", [
@@ -869,6 +872,11 @@ def launch_app(app: dict) -> bool:
             # Comandos del sistema: shell=True para que Windows los resuelva
             subprocess.Popen(exe_path, shell=True,
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif "WindowsApps" in str(exe_path):
+            if "Microsoft.WindowsStore" in str(exe_path):
+                subprocess.Popen(["cmd", "/c", "start", "ms-windows-store:"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                subprocess.Popen(["explorer.exe", str(exe_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
             # App normal con ruta absoluta
             exe = Path(exe_path)
