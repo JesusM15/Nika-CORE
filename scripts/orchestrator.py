@@ -124,14 +124,8 @@ INTENT_PATTERNS: list[Tuple[str, re.Pattern]] = [
         r"c[oó]mo\s+est[aá]s|qu[eé]\s+est[aá]s\s+haciendo|informe|status|est[aá]s\s+ah[ií])",
         re.IGNORECASE,
     )),
-
-    # ── CONVERSACIÓN IA (FALLBACK) ─────────────────────────────────────────────
-    # Matches: Cualquier cosa que no haya coincidido con los anteriores (chistes, preguntas)
-    ("chat_ai", re.compile(
-        r"^(.*)$",
-        re.IGNORECASE,
-    )),
 ]
+
 
 # Respuestas de fallback aleatorias para cuando no se entiende el comando
 FALLBACK_RESPONSES = [
@@ -225,34 +219,114 @@ class Orchestrator:
     def _extract_intent(self, text: str) -> Tuple[Optional[str], Optional[re.Match]]:
         """
         Evalúa el texto contra los patrones de intención en orden de prioridad.
-        Usa algoritmos de normalización para limpiar la basura de la STT antes
-        de aplicar las expresiones regulares.
+        Pipeline de 3 etapas:
+          1. Normalización NLU (limpia muletillas, typos de STT)
+          2. Regex estructurado (intenciones precisas)
+          3. Red de seguridad semántica (keywords fuzzy → intent forzado)
         """
         normalized = text.lower().strip()
-        
-        # ── NORMALIZACIÓN ALGORÍTMICA (NLU Pre-processing) ──
-        # 1. Elimina palabras de cortesía y muletillas al inicio
-        normalized = re.sub(r'^(?:oye|mira|nika|por\s+favor|puedes|podr[ií]as|quiero(?:\s+que)?|necesito(?:\s+que)?|me\s+gustar[ií]a|trata\s+de|intenta)\s+', '', normalized).strip()
-        
-        # 2. Corrige errores típicos de la IA de voz (ej. letras repetidas "unn")
-        normalized = re.sub(r'\bunn+\b', 'un', normalized)
-        normalized = re.sub(r'\b(y|e)\s+intento\b', 'intento', normalized) # ruido
-        
-        # 3. Separa el "me" o "lo" adherido a los verbos para simplificar regex
-        # ej: "mandame" -> "manda me", "abreme" -> "abre me", "buscalo" -> "busca lo"
-        normalized = re.sub(r'\b(manda|redacta|escribe|abre|habre|cierra|sierra|pon|reproduce|busca|investiga|apaga|enciende)(me|lo|la|le)\b', r'\1 \2', normalized)
-        
-        normalized = normalized.strip()
-        logger.debug(f"[Orchestrator] Texto normalizado para NLU: '{normalized}'")
 
+        # ── ETAPA 1: NORMALIZACIÓN NLU ─────────────────────────────────────────
+        # a) Elimina muletillas y cortesía al inicio
+        normalized = re.sub(
+            r'^(?:oye|mira|nika|nica|nyka|por\s+favor|puedes|podrias|podrías|'
+            r'quiero(?:\s+que)?|necesito(?:\s+que)?|me\s+gustar[ií]a|'
+            r'trata\s+de|intenta|a\s+ver|eh|um|eh+|mm+)\s+',
+            '', normalized
+        ).strip()
+
+        # b) Corrige errores ortográficos típicos de Vosk/STT
+        normalized = re.sub(r'\bunn+\b', 'un', normalized)
+        normalized = re.sub(r'\bunna+\b', 'una', normalized)
+        normalized = re.sub(r'\bporf[ao]vor\b', 'por favor', normalized)
+        normalized = re.sub(r'\b(haber|aber)\b', 'a ver', normalized)
+        normalized = re.sub(r'\b(manda|redacta|escribe|abre|habre|cierra|sierra|'
+                            r'pon|reproduce|busca|investiga|apaga|enciende)'
+                            r'(me|lo|la|le)\b', r'\1 \2', normalized)
+
+        normalized = normalized.strip()
+        logger.info(f"[Orchestrator] NLU→ '{normalized}'")
+
+        # ── ETAPA 2: REGEX ESTRUCTURADO ────────────────────────────────────────
         for intent_name, pattern in INTENT_PATTERNS:
+            if intent_name == "chat_ai":
+                continue  # lo aplicamos SOLO si ningún otro matchea
             match = pattern.search(normalized)
             if match:
-                logger.debug(f"[Orchestrator] Intención: '{intent_name}' | match='{match.group(0)}'")
+                logger.debug(f"[Orchestrator] Intención regex: '{intent_name}'")
                 return intent_name, match
 
-        logger.warning(f"[Orchestrator] Sin intención para: '{text}' (normalizado: '{normalized}')")
-        return None, None
+        # ── ETAPA 3: RED DE SEGURIDAD SEMÁNTICA (antes de Gemini) ─────────────
+        # Diccionario de palabras clave → intent forzado.
+        # Si una palabra clave (o variante fuzzy) aparece en el texto normalizado,
+        # re-construimos un match artificial y retornamos el intent correcto.
+        KEYWORD_INTENTS: list[Tuple[str, list[str]]] = [
+            ("play_music",    ["reproduce", "reproducir", "pon", "toca", "cancion", "musica",
+                               "música", "cancio", "spotify", "artista", "album", "disco",
+                               "escucha", "escuchar", "pista", "rola", "cantar", "canta"]),
+            ("media_control", ["pausa", "pausar", "para", "silencio", "callate", "detén",
+                               "siguiente", "salta", "anterior", "atras", "sube", "baja",
+                               "volumen", "continua", "reanuda", "resume", "play"]),
+            ("open_app",      ["abre", "abrir", "habre", "arranca", "arrancame", "inicia",
+                               "ejecuta", "lanza", "enciende", "muestra"]),
+            ("close_app",     ["cierra", "sierra", "cerrar", "mata", "quita", "detiene",
+                               "apaga", "termina"]),
+            ("send_email",    ["correo", "email", "e-mail", "mensaje", "redacta", "escribe",
+                               "manda", "envia", "envía", "mándame", "mandame"]),
+            ("web_search",    ["busca", "buscar", "busco", "googlea", "investiga", "google",
+                               "busqueda", "búsqueda", "internet"]),
+            ("system_status", ["estado", "estatus", "como estas", "cómo estás", "status",
+                               "informe", "estas ahi", "estás ahí"]),
+        ]
+
+        def _fuzzy_in(word: str, candidates: list[str], threshold: float = 0.78) -> bool:
+            """Retorna True si 'word' es fuzzy-similar a alguno de los candidates."""
+            for cand in candidates:
+                if cand in word or word in cand:
+                    return True
+                max_len = max(len(word), len(cand))
+                if max_len == 0:
+                    continue
+                dist = _levenshtein_simple(word, cand)
+                if 1.0 - dist / max_len >= threshold:
+                    return True
+            return False
+
+        def _levenshtein_simple(s1: str, s2: str) -> int:
+            if len(s1) < len(s2):
+                s1, s2 = s2, s1
+            if not s2:
+                return len(s1)
+            prev = list(range(len(s2) + 1))
+            for i, c1 in enumerate(s1):
+                curr = [i + 1]
+                for j, c2 in enumerate(s2):
+                    curr.append(min(prev[j+1]+1, curr[j]+1, prev[j]+(c1 != c2)))
+                prev = curr
+            return prev[-1]
+
+        tokens = normalized.split()
+        for intent_name, keywords in KEYWORD_INTENTS:
+            for token in tokens:
+                if len(token) < 3:
+                    continue
+                if _fuzzy_in(token, keywords):
+                    logger.info(
+                        f"[Orchestrator] ⚡ Semántica salvó '{intent_name}': "
+                        f"token='{token}' en texto='{normalized}'"
+                    )
+                    # Crear un match artificial con el texto completo en group(1)
+                    dummy_pattern = re.compile(r"^(.*)$", re.IGNORECASE)
+                    dummy_match = dummy_pattern.match(normalized)
+                    return intent_name, dummy_match
+
+        # ── FALLBACK a chat_ai ─────────────────────────────────────────────────
+        logger.warning(f"[Orchestrator] Sin intent estructurado → chat_ai: '{text}'")
+        chat_pattern = re.compile(r"^(.*)$", re.IGNORECASE)
+        chat_match = chat_pattern.match(normalized)
+        return "chat_ai", chat_match
+
+
 
     # ══════════════════════════════════════════════════
     #  HANDLERS DE INTENCIONES

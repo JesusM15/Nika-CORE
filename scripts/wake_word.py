@@ -74,28 +74,107 @@ COMMAND_RECORD_SECS = float(os.getenv("COMMAND_RECORD_SECS", "5.0"))
 # Con CHUNK_SIZE=4000 y 16kHz, cada chunk = 0.25s, entonces 3 chunks = 0.75s
 PRE_KEYWORD_CHUNKS = int(os.getenv("PRE_KEYWORD_CHUNKS", "3"))
 
-# ── Set de keywords y variaciones fonéticas ───────────────────────────────────
-# Incluye variaciones comunes en STT español y errores fonéticos frecuentes.
-# Vosk a veces añade puntuación al final (ej. "nika."), por eso se incluyen.
+# ── Set de keywords de ACTIVACION ────────────────────────────────────────────
+# La detección ya no es un simple "in" sino un algoritmo fuzzy multi-capa.
+# Aquí solo ponemos las raíces/núcleos; el algoritmo cubre las variaciones.
 WAKE_WORDS: set[str] = {
-    # Variaciones principales
+    # Núcleos fonológicos de la palabra "nika"
     "nika", "nica", "nyka", "nikas", "nicas", "nykas",
     "mica", "kika", "mika", "lika", "dica", "ni k", "ni cap",
     "nita", "mita", "niga", "nicha", "neta", "dika", "micas",
+    "neca", "nica", "nyca", "nkia",
     # Con puntuación (artefactos de Vosk)
-    "nika.", "nica.", "nyka.", "hola.",
-    # Con saludo (activación más natural)
+    "nika.", "nica.", "nyka.",
+    # Con saludo (activación más natural: alta probabilidad)
     "hola nika", "hola nica", "hola nyka", "hola kika", "hola mica",
     "oye nika",  "oye nica",  "oye nyka",
-    # Otras opciones pedidas
+    "ey nika",   "hey nika",  "hey nica",
+    # Activadores simples pedidos por el usuario
     "hola", "ola", "buenas", "despierta", "me oyes", "escuchas",
     "oye", "hey", "ey", "escuchame", "despiertate", "atencion",
     # Errores fonéticos comunes en español
     "nica os",   "nika os",
 }
 
+# Umbral mínimo de similitud fuzzy (0.0-1.0). 0.70 = ~2 letras de margen en 5.
+WAKE_WORD_FUZZY_THRESHOLD = float(os.getenv("WAKE_WORD_FUZZY_THRESHOLD", "0.72"))
+
+# Raíces fonológicas cortas. Si una palabra EMPIEZA con alguna de estas, es una activación.
+WAKE_WORD_ROOTS: tuple = ("nik", "nic", "kik", "mik", "dik", "nek")
+
+
+def _levenshtein(s1: str, s2: str) -> int:
+    """Distancia de edición mínima entre dos strings. O(n*m)."""
+    if len(s1) < len(s2):
+        return _levenshtein(s2, s1)
+    if not s2:
+        return len(s1)
+    prev = list(range(len(s2) + 1))
+    for i, c1 in enumerate(s1):
+        curr = [i + 1]
+        for j, c2 in enumerate(s2):
+            curr.append(min(prev[j + 1] + 1, curr[j] + 1, prev[j] + (c1 != c2)))
+        prev = curr
+    return prev[-1]
+
+
+def _contains_wake_word(text: str) -> bool:
+    """
+    Detector de wake word multi-capa con algoritmos combinados:
+
+    Capa 1 - Match exacto:      el texto completo está en WAKE_WORDS
+    Capa 2 - Substring:         cualquier wake word está dentro del texto
+    Capa 3 - Raíz fonética:     algún token empieza con nik/nic/kik/etc.
+    Capa 4 - Fuzzy Levenshtein: similitud ≥ umbral contra cada wake word
+              (umbral se reduce a 0.60 si hay saludo al inicio)
+    """
+    text_clean = text.lower().strip().rstrip(".!?, ")
+
+    # Capa 1 — exacto
+    if text_clean in WAKE_WORDS:
+        logger.debug(f"[WakeWord] Match exacto: '{text_clean}'")
+        return True
+
+    # Capa 2 — substring
+    for kw in WAKE_WORDS:
+        if kw in text_clean:
+            logger.debug(f"[WakeWord] Match substring: '{kw}' en '{text_clean}'")
+            return True
+
+    tokens = text_clean.split()
+
+    # Capa 3 — raíz fonológica al inicio de algún token
+    for token in tokens:
+        for root in WAKE_WORD_ROOTS:
+            if token.startswith(root):
+                logger.debug(f"[WakeWord] Match por raíz '{root}': token='{token}'")
+                return True
+
+    # Capa 4 — fuzzy Levenshtein por token
+    # Si hay un saludo al inicio, bajamos el umbral (intención más clara)
+    GREETINGS = {"hola", "ola", "oye", "ey", "hey", "buenas", "oiga", "ali"}
+    first = tokens[0] if tokens else ""
+    threshold = 0.60 if first in GREETINGS else WAKE_WORD_FUZZY_THRESHOLD
+
+    for token in tokens:
+        if len(token) < 3:  # ignorar ruido de 1-2 letras
+            continue
+        for kw in WAKE_WORDS:
+            for kw_part in kw.split():
+                if len(kw_part) < 3:
+                    continue
+                max_len = max(len(token), len(kw_part))
+                sim = 1.0 - _levenshtein(token, kw_part) / max_len
+                if sim >= threshold:
+                    logger.debug(f"[WakeWord] Fuzzy match: '{token}'≈'{kw_part}' (sim={sim:.2f})")
+                    return True
+
+    return False
+
+
 # ── Estado global del detector de voz (para broadcast WS) ────────────────────
 _voice_active = False
+
 
 
 def _notify_voice_state(state: str):
@@ -325,7 +404,7 @@ class WakeWordDetector:
                 # Imprime en la misma línea para que veas qué está escuchando Vosk en tiempo real
                 print(f"\r👂 Vosk escuchando: {partial_text}\033[K", end="", flush=True)
                 
-            if partial_text and self._contains_wake_word(partial_text):
+            if partial_text and _contains_wake_word(partial_text):
                 print() # Salto de línea
                 logger.info(f"[WakeWord] Keyword en parcial: '{partial_text}'")
                 self._on_keyword_detected()
@@ -337,7 +416,7 @@ class WakeWordDetector:
             final_text = final_json.get("text", "")
             if final_text:
                 logger.debug(f"[WakeWord] Resultado final: '{final_text}'")
-                if self._contains_wake_word(final_text):
+                if _contains_wake_word(final_text):
                     logger.info(f"[WakeWord] Keyword en final: '{final_text}'")
                     self._on_keyword_detected()
 
