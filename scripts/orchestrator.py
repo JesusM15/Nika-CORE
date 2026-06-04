@@ -50,7 +50,7 @@ INTENT_PATTERNS: list[Tuple[str, re.Pattern]] = [
     # ── CONTROL DE MÚSICA (antes de open_app para que "pon música" no abra "música") ─
     # Matches: "pon música", "reproduce una cancion de taylor", "quiero escuchar a the weeknd"
     ("play_music", re.compile(
-        r"(?:pon(?:me)?|reproduce|reprod[uú]ceme|toca|lanza|escuchar|quiero\s+escuchar)\s+"
+        r"(?:(?:puedes\s+|podr[ií]as\s+|quiero\s+(?:que\s+)?|por\s+favor\s+)?(?:pon(?:me)?|coloca|reproduce|reprod[uú]ceme|toca|lanza|escuchar|quiero\s+escuchar))\s+"
         r"(?:(?:la\s+|una\s+)?(?:m[uú]sica|canci[oó]n|pista|rola)(?:\s+de)?|(?:el\s+|un\s+)?(?:[aá]lbum|disco)|(?:el\s+|un\s+)?artista|a\s+)?\s*"
         r"(.*?)"
         r"(?:\s+en\s+(.+))?$",
@@ -73,16 +73,16 @@ INTENT_PATTERNS: list[Tuple[str, re.Pattern]] = [
     )),
 
     # ── ABRIR APLICACIÓN ───────────────────────────────────────────────────────
-    # Matches: "abreme spotify", "arranca word", "habre el navegador"
+    # Matches: "abreme spotify", "puedes arrancar word", "habre el navegador"
     ("open_app", re.compile(
-        r"(?:[aá]bre(?:me)?|habre(?:me)?|inicia|ejecuta|lanza|pon(?:me)?|enciende|arranca|mu[eé]strame)\s+(.+?)(?:\s+en\s+(.+))?$",
+        r"(?:(?:puedes\s+|podr[ií]as\s+|quiero\s+(?:que\s+)?|por\s+favor\s+)?(?:[aá]bre(?:me)?|habre(?:me)?|inicia|ejecuta|lanza|pon(?:me)?|enciende|arranca|mu[eé]strame))\s+(.+?)(?:\s+en\s+(.+))?$",
         re.IGNORECASE,
     )),
 
     # ── CERRAR APLICACIÓN ──────────────────────────────────────────────────────
-    # Matches: "cierrame spotify", "sierra chrome", "quita el juego"
+    # Matches: "cierrame spotify", "por favor sierra chrome", "quita el juego"
     ("close_app", re.compile(
-        r"(?:cierra(?:me)?|sierra(?:me)?|det[eé]n|detiene|para|mata|quita|apaga)\s+(.+?)(?:\s+en\s+(.+))?$",
+        r"(?:(?:puedes\s+|podr[ií]as\s+|quiero\s+(?:que\s+)?|por\s+favor\s+)?(?:cierra(?:me)?|sierra(?:me)?|det[eé]n|detiene|para|mata|quita|apaga))\s+(.+?)(?:\s+en\s+(.+))?$",
         re.IGNORECASE,
     )),
 
@@ -105,7 +105,7 @@ INTENT_PATTERNS: list[Tuple[str, re.Pattern]] = [
     # ── BÚSQUEDA WEB ───────────────────────────────────────────────────────────
     # Matches: "busca en google recetas", "googlea sobre perros", "investiga"
     ("web_search", re.compile(
-        r"(?:b[uú]sca(?:me)?|buscar|b[uú]scalo|investiga(?:me)?|googlea)\s+"
+        r"(?:(?:puedes\s+|podr[ií]as\s+|quiero\s+(?:que\s+)?|por\s+favor\s+)?(?:b[uú]sca(?:me)?|buscar|b[uú]scalo|investiga(?:me)?|googlea))\s+"
         r"(?:(?:algo\s+)?(?:en\s+)?(?:google|internet|la\s+web)\s+(?:sobre\s+|de\s+)?)?"
         r"(.*?)"
         r"(?:\s+en\s+(.+))?$",
@@ -115,8 +115,8 @@ INTENT_PATTERNS: list[Tuple[str, re.Pattern]] = [
     # ── ESTADO DEL SISTEMA ─────────────────────────────────────────────────────
     # Matches: "cómo estás", "estás ahí", "estado del sistema"
     ("system_status", re.compile(
-        r"(?:c[oó]mo\s+est[aá]s|estado(?:\s+del\s+sistema)?|"
-        r"qu[eé]\s+est[aá]s\s+haciendo|informe|status|est[aá]s\s+ah[ií])",
+        r"(?:(?:puedes\s+|podr[ií]as\s+)?(?:dime\s+|darme\s+)?(?:el\s+)?estado(?:\s+del\s+sistema)?|"
+        r"c[oó]mo\s+est[aá]s|qu[eé]\s+est[aá]s\s+haciendo|informe|status|est[aá]s\s+ah[ií])",
         re.IGNORECASE,
     )),
 
@@ -249,6 +249,11 @@ class Orchestrator:
         app_name    = match.group(1).strip()
         device_hint = match.group(2).strip() if match.lastindex >= 2 and match.group(2) else None
 
+        # Fix phonetic issues for apps
+        app_name_lower = app_name.lower()
+        if app_name_lower == "crohn" or app_name_lower == "crome":
+            app_name = "chrome"
+            
         device_id = self._resolve_device(device_hint)
 
         if not device_id:
@@ -567,10 +572,22 @@ class Orchestrator:
             "sheik it off": "shake it off",
             "blank space": "blank space",
             "bad blod": "bad blood",
-            "yugilón wimi": "you belong with me"
+            "yugilón wimi": "you belong with me",
+            "repite ella": "ready for it",
+            "mil novecientos ochenta y nueve": "1989",
+            "folclor": "folklore",
+            "1989": "1989" # just in case
         }
         for wrong, right in phonetic_map.items():
             query = query.replace(wrong, right)
+            
+        # Determinar si el usuario pidió un álbum, artista o canción
+        full_match = match.group(0).lower()
+        search_type = "track"
+        if any(w in full_match for w in ("álbum", "album", "disco")):
+            search_type = "album"
+        elif any(w in full_match for w in ("artista", "grupo", "banda")):
+            search_type = "artist"
             
         device_hint = match.group(2).strip() if match.group(2) else None
         device_id   = self._resolve_device(device_hint)

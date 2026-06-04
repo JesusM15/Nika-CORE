@@ -80,11 +80,14 @@ PRE_KEYWORD_CHUNKS = int(os.getenv("PRE_KEYWORD_CHUNKS", "3"))
 WAKE_WORDS: set[str] = {
     # Variaciones principales
     "nika", "nica", "nyka", "nikas", "nicas", "nykas",
+    "mica", "kika", "mika", "lika", "dica", "ni k", "ni cap",
     # Con puntuación (artefactos de Vosk)
-    "nika.", "nica.", "nyka.",
+    "nika.", "nica.", "nyka.", "hola.",
     # Con saludo (activación más natural)
-    "hola nika", "hola nica", "hola nyka",
+    "hola nika", "hola nica", "hola nyka", "hola kika", "hola mica",
     "oye nika",  "oye nica",  "oye nyka",
+    # Otras opciones pedidas
+    "hola", "ola", "buenas", "despierta", "me oyes", "escuchas",
     # Errores fonéticos comunes en español
     "nica os",   "nika os",
 }
@@ -316,7 +319,12 @@ class WakeWordDetector:
         if not is_final:
             partial_json = json.loads(self.recognizer.PartialResult())
             partial_text = partial_json.get("partial", "")
+            if partial_text:
+                # Imprime en la misma línea para que veas qué está escuchando Vosk en tiempo real
+                print(f"\r👂 Vosk escuchando: {partial_text}\033[K", end="", flush=True)
+                
             if partial_text and self._contains_wake_word(partial_text):
+                print() # Salto de línea
                 logger.info(f"[WakeWord] Keyword en parcial: '{partial_text}'")
                 self._on_keyword_detected()
                 return
