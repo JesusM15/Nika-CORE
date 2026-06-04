@@ -55,6 +55,22 @@ def _parse_when(text: str) -> Optional[datetime]:
       "el lunes a las 10"  → próximo lunes a las 10:00
     """
     text = text.lower().strip()
+
+    # Mapear palabras numéricas comunes a dígitos en español
+    num_map = {
+        "una": "1", "uno": "1", "un": "1",
+        "dos": "2", "tres": "3", "cuatro": "4", "cinco": "5",
+        "seis": "6", "siete": "7", "ocho": "8", "nueve": "9",
+        "diez": "10", "once": "11", "doce": "12", "trece": "13",
+        "catorce": "14", "quince": "15", "dieciséis": "16", "dieciseis": "16",
+        "veinte": "20", "treinta": "30", "cuarenta": "40", "cincuenta": "50"
+    }
+    words = text.split()
+    for i, w in enumerate(words):
+        if w in num_map:
+            words[i] = num_map[w]
+    text = " ".join(words)
+
     now = datetime.now()
 
     # ── Relativo: "(en/de) X segundos/minutos/horas" ───────────────────────────

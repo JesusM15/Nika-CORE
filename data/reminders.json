@@ -5,8 +5,9 @@
       "text": "sacar la basura",
       "when_str": "en 10 minutos",
       "when_ts": 1780607934.739931,
-      "fired": false,
-      "created": 1780607334.7399313
+      "fired": true,
+      "created": 1780607334.7399313,
+      "fire_ts": 1780607957.1103435
     },
     {
       "id": 1780607334739,
@@ -15,6 +16,14 @@
       "when_ts": 1780711200.0,
       "fired": false,
       "created": 1780607334.7399313
+    },
+    {
+      "id": 1780607978276,
+      "text": "Temporizador",
+      "when_str": "de diez segundos",
+      "when_ts": 1780607988.276102,
+      "fired": false,
+      "created": 1780607978.2761018
     }
   ]
 }

@@ -156,13 +156,26 @@ def _pick(phrases: list, **kwargs) -> str:
     return random.choice(phrases).format(**kwargs)
 
 
-def _safe_group(match: re.Match, n: int, default: str = "") -> str:
+def _safe_group(match: Any, n: int, default: str = "") -> str:
     """
-    Accede a match.group(n) de forma segura.
-    Retorna 'default' si el grupo no existe o es None.
-    Evita IndexError cuando el match viene de la capa semántica
-    (que genera matches con menos grupos que los handlers esperan).
+    Accede a match.group(n) de forma segura o al valor del dict si match es un dict de parámetros.
+    Evita IndexError/AttributeError.
     """
+    if isinstance(match, dict):
+        if n == 1:
+            for k in ("app_name", "query", "to", "mode_name", "text", "device"):
+                if k in match:
+                    val = match.get(k)
+                    if val is not None:
+                        return str(val).strip()
+        elif n == 2:
+            for k in ("device", "subject", "when_str"):
+                if k in match:
+                    val = match.get(k)
+                    if val is not None:
+                        return str(val).strip()
+        return default
+
     try:
         val = match.group(n)
         return val.strip() if val else default
@@ -419,7 +432,20 @@ class Orchestrator:
         """
         logger.info(f"[Orchestrator] 🎙️ Procesando: '{text}'")
 
-        intent, match = self._extract_intent(text)
+        # 1. Intentar extracción por regex estructurado local (rápido y determinista)
+        intent, match = self._extract_intent_regex(text)
+
+        # 2. Si regex falla, intentar Gemini NLU para una interpretación inteligente
+        if intent is None:
+            logger.info("[Orchestrator] Regex falló, intentando Gemini NLU...")
+            gemini_res = await self._call_gemini_nlu(text)
+            if gemini_res:
+                intent, match = gemini_res
+                logger.info(f"[Orchestrator] Gemini NLU detectó: '{intent}' con params: {match}")
+            else:
+                # 3. Si Gemini NLU falla o no está disponible, usar la red de seguridad semántica local
+                logger.info("[Orchestrator] Gemini NLU no disponible o falló, usando red de seguridad semántica local...")
+                intent, match = self._extract_intent_semantic(text)
 
         if intent is None:
             global _fallback_idx
@@ -459,20 +485,15 @@ class Orchestrator:
         logger.info(f"[Orchestrator] Resultado: {result['action']} | éxito={result['success']}")
         return result
 
-    # ── Extracción de intención ───────────────────────────────────────────────
+    # ── Extracción de intención (Pipeline local + nube) ───────────────────────
 
-    def _extract_intent(self, text: str) -> Tuple[Optional[str], Optional[re.Match]]:
+    def _extract_intent_regex(self, text: str) -> Tuple[Optional[str], Optional[re.Match]]:
         """
-        Evalúa el texto contra los patrones de intención en orden de prioridad.
-        Pipeline de 3 etapas:
-          1. Normalización NLU (limpia muletillas, typos de STT)
-          2. Regex estructurado (intenciones precisas)
-          3. Red de seguridad semántica (keywords fuzzy → intent forzado)
+        Intenta extraer la intención usando los patrones regex definidos localmente.
         """
         normalized = text.lower().strip()
 
-        # ── ETAPA 1: NORMALIZACIÓN NLU ─────────────────────────────────────────
-        # a) Elimina muletillas y cortesía al inicio
+        # ── NORMALIZACIÓN NLU ──
         normalized = re.sub(
             r'^(?:oye|mira|nika|nica|nyka|por\s+favor|puedes|podrias|podrías|'
             r'quiero(?:\s+que)?|necesito(?:\s+que)?|me\s+gustar[ií]a|'
@@ -480,31 +501,114 @@ class Orchestrator:
             '', normalized
         ).strip()
 
-        # b) Corrige errores ortográficos típicos de Vosk/STT
-        normalized = re.sub(r'\bunn+\b', 'un', normalized)
-        normalized = re.sub(r'\bunna+\b', 'una', normalized)
-        normalized = re.sub(r'\bporf[ao]vor\b', 'por favor', normalized)
+        normalized = re.sub(r'\b(porf[ao]vor)\b', 'por favor', normalized)
         normalized = re.sub(r'\b(haber|aber)\b', 'a ver', normalized)
         normalized = re.sub(r'\b(manda|redacta|escribe|abre|habre|cierra|sierra|'
                             r'pon|reproduce|busca|investiga|apaga|enciende)'
                             r'(me|lo|la|le)\b', r'\1 \2', normalized)
-
         normalized = normalized.strip()
-        logger.info(f"[Orchestrator] NLU→ '{normalized}'")
 
-        # ── ETAPA 2: REGEX ESTRUCTURADO ────────────────────────────────────────
         for intent_name, pattern in INTENT_PATTERNS:
             if intent_name == "chat_ai":
-                continue  # lo aplicamos SOLO si ningún otro matchea
+                continue
             match = pattern.search(normalized)
             if match:
-                logger.debug(f"[Orchestrator] Intención regex: '{intent_name}'")
+                logger.debug(f"[Orchestrator] Intención regex local: '{intent_name}'")
                 return intent_name, match
 
-        # ── ETAPA 3: RED DE SEGURIDAD SEMÁNTICA (antes de Gemini) ─────────────
-        # Diccionario de palabras clave → intent forzado.
-        # Si una palabra clave (o variante fuzzy) aparece en el texto normalizado,
-        # re-construimos un match artificial y retornamos el intent correcto.
+        return None, None
+
+    async def _call_gemini_nlu(self, text: str) -> Optional[Tuple[str, dict]]:
+        """
+        Llama a la API de Gemini para clasificar el texto del comando y extraer entidades.
+        Retorna (intent, parameters) o None si falla.
+        """
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            logger.warning("[Orchestrator NLU] GEMINI_API_KEY no configurada.")
+            return None
+            
+        try:
+            from google import genai
+            client = genai.Client(api_key=api_key)
+            
+            prompt = f"""
+            Analiza el siguiente comando de voz en español del usuario para un asistente virtual de PC llamado Nika.
+            Identifica la intención (intent) correcta y extrae los parámetros necesarios.
+
+            Intenciones posibles:
+            - "set_reminder": Para poner alarmas, recordatorios, temporizadores (timers).
+              Parámetros:
+                - "text": El texto de lo que se va a recordar (ej: "sacar la basura", "Temporizador", "Alarma"). Si es un timer/temporizador sin texto descriptivo, usa "Temporizador". Si es una alarma, usa "Alarma".
+                - "when_str": La especificación de tiempo (ej: "en 5 minutos", "de 10 segundos", "mañana a las 8").
+            - "list_reminders": Para ver o listar alarmas, recordatorios o timers pendientes.
+            - "cancel_reminder": Para cancelar o borrar alarmas, recordatorios o timers.
+            - "play_music": Para reproducir música, canciones, discos o artistas en Spotify.
+              Parámetros:
+                - "query": El término de búsqueda de música (ej: "taylor swift", "wildest dreams", "pato gallina itowngameplay"). Corrige cualquier error ortográfico o de pronunciación común al español (ej: "pato gallina de town" -> "pato gallina itowngameplay").
+                - "device": Dispositivo donde reproducir (opcional).
+            - "media_control": Para controlar la reproducción (pausa, play, reanuda, siguiente, anterior, subir volumen, bajar volumen).
+              Parámetros:
+                - "control": Uno de: "pause", "play", "next", "prev", "volume_up", "volume_down", "mute".
+                - "device": Dispositivo a controlar (opcional).
+            - "open_app": Para abrir o iniciar una aplicación.
+              Parámetros:
+                - "app_name": Nombre de la aplicación a abrir (ej: "chrome", "spotify").
+                - "device": Dispositivo donde abrir (opcional).
+            - "close_app": Para cerrar o detener una aplicación.
+              Parámetros:
+                - "app_name": Nombre de la aplicación a cerrar.
+                - "device": Dispositivo (opcional).
+            - "activate_mode": Para activar un modo de trabajo, estudio, gaming, etc.
+              Parámetros:
+                - "mode_name": Nombre del modo.
+                - "device": Dispositivo (opcional).
+            - "web_search": Para buscar algo en Google/internet.
+              Parámetros:
+                - "query": Lo que se va a buscar.
+                - "device": Dispositivo (opcional).
+            - "send_email": Para redactar, mandar o escribir un correo/email.
+              Parámetros:
+                - "to": Destinatario (opcional).
+                - "subject": Asunto (opcional).
+            - "shutdown_device": Para apagar la computadora o laptop.
+            - "scan_devices": Para escanear dispositivos de la red.
+            - "system_status": Para preguntar el estado de Nika.
+            - "chat_ai": Conversación general o preguntas generales (ej: "¿quién eres?", "¿cuál es la capital de Francia?").
+
+            Devuelve la respuesta ÚNICAMENTE como un objeto JSON con el siguiente formato:
+            {{
+              "intent": "nombre_del_intent",
+              "parameters": {{ ... }}
+            }}
+
+            Comando del usuario: "{text}"
+            """
+            
+            # Usar gemini-2.5-flash para máxima velocidad
+            response = client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt,
+                config={'response_mime_type': 'application/json'}
+            )
+            
+            res_text = response.text.strip()
+            logger.info(f"[Orchestrator NLU] Gemini response: {res_text}")
+            
+            data = json.loads(res_text)
+            intent = data.get("intent")
+            params = data.get("parameters", {})
+            return intent, params
+            
+        except Exception as e:
+            logger.error(f"[Orchestrator NLU] Error llamando a Gemini NLU: {e}")
+            return None
+
+    def _extract_intent_semantic(self, text: str) -> Tuple[Optional[str], Any]:
+        """
+        Red de seguridad semántica local si el regex y Gemini fallan.
+        """
+        normalized = text.lower().strip()
         KEYWORD_INTENTS: list[Tuple[str, list[str]]] = [
             ("play_music",    ["reproduce", "reproducir", "pon", "toca", "cancion", "musica",
                                "música", "cancio", "spotify", "artista", "album", "disco",
@@ -525,9 +629,8 @@ class Orchestrator:
         ]
 
         def _fuzzy_in(word: str, candidates: list[str], threshold: float = 0.78) -> bool:
-            """Retorna True si 'word' es fuzzy-similar a alguno de los candidates."""
             for cand in candidates:
-                if cand in word or word in cand:
+                if cand in word:
                     return True
                 max_len = max(len(word), len(cand))
                 if max_len == 0:
@@ -560,13 +663,13 @@ class Orchestrator:
                         f"[Orchestrator] ⚡ Semántica salvó '{intent_name}': "
                         f"token='{token}' en texto='{normalized}'"
                     )
-                    # dummy_match con 2 grupos: group(1)=query/nombre, group(2)=None (sin device)
+                    # dummy_match
                     dummy_pattern = re.compile(r"^(.*?)()$", re.IGNORECASE)
                     dummy_match = dummy_pattern.match(normalized)
                     return intent_name, dummy_match
 
-        # ── FALLBACK a chat_ai ─────────────────────────────────────────────────
-        logger.warning(f"[Orchestrator] Sin intent estructurado → chat_ai: '{text}'")
+        # FALLBACK a chat_ai
+        logger.warning(f"[Orchestrator] Sin intent estructurado local ni semántico → chat_ai: '{text}'")
         chat_pattern = re.compile(r"^(.*?)()$", re.IGNORECASE)
         chat_match = chat_pattern.match(normalized)
         return "chat_ai", chat_match
@@ -1028,13 +1131,50 @@ class Orchestrator:
             "data": {"to": recipient, "subject": subject}
         }
 
-    async def _handle_media_control(self, match: re.Match) -> Dict[str, Any]:
+    async def _handle_media_control(self, match: Any) -> Dict[str, Any]:
         """
         Controla la reproducción multimedia (pause, next, prev, volumen).
         Usa media keys del sistema operativo.
         """
-        full_text   = match.group(0).lower().strip()
-        device_hint = match.group(1).strip() if match.group(1) else None
+        if isinstance(match, dict):
+            control = match.get("control", "play_pause")
+            device_hint = match.get("device")
+            response_text = {
+                "pause": "Pausando la música",
+                "play": "Continuando la música",
+                "next": "Siguiente canción",
+                "prev": "Canción anterior",
+                "volume_up": "Subiendo volumen",
+                "volume_down": "Bajando volumen",
+                "mute": "Silenciando"
+            }.get(control, "Controlando reproducción")
+        else:
+            full_text   = match.group(0).lower().strip()
+            device_hint = match.group(1).strip() if match.group(1) else None
+            
+            # Determinar la acción de media según el texto capturado
+            if any(w in full_text for w in ("pausa", "para", "detén", "detiene")):
+                control = "pause"
+                response_text = "Pausando la música"
+            elif any(w in full_text for w in ("continua", "resume")):
+                control = "play"
+                response_text = "Continuando la música"
+            elif any(w in full_text for w in ("siguiente", "salta")):
+                control = "next"
+                response_text = "Siguiente canción"
+            elif any(w in full_text for w in ("anterior", "atrás")):
+                control = "prev"
+                response_text = "Canción anterior"
+            elif any(w in full_text for w in ("sube", "más")):
+                control = "volume_up"
+                response_text = "Subiendo volumen"
+            elif any(w in full_text for w in ("baja", "menos")):
+                control = "volume_down"
+                response_text = "Bajando volumen"
+            else:
+                control = "play_pause"
+                response_text = "Alternando reproducción"
+
         device_id   = self._resolve_device(device_hint)
 
         if not device_id:
@@ -1044,29 +1184,6 @@ class Orchestrator:
                 "response": "No hay dispositivos conectados.",
                 "data":     {},
             }
-
-        # Determinar la acción de media según el texto capturado
-        if any(w in full_text for w in ("pausa", "para", "detén", "detiene")):
-            control = "pause"
-            response_text = "Pausando la música"
-        elif any(w in full_text for w in ("continua", "resume")):
-            control = "play"
-            response_text = "Continuando la música"
-        elif any(w in full_text for w in ("siguiente", "salta")):
-            control = "next"
-            response_text = "Siguiente canción"
-        elif any(w in full_text for w in ("anterior", "atrás")):
-            control = "prev"
-            response_text = "Canción anterior"
-        elif any(w in full_text for w in ("sube", "más")):
-            control = "volume_up"
-            response_text = "Subiendo volumen"
-        elif any(w in full_text for w in ("baja", "menos")):
-            control = "volume_down"
-            response_text = "Bajando volumen"
-        else:
-            control = "play_pause"
-            response_text = "Alternando reproducción"
 
         command = {"action": "media_control", "control": control}
         success = self.mqtt.publish_command(device_id, command) if self.mqtt else False
@@ -1081,14 +1198,18 @@ class Orchestrator:
 
     # ── Recordatorios, Alarmas y Temporizadores ────────────────────────────────
 
-    async def _handle_set_reminder(self, match: re.Match) -> Dict[str, Any]:
+    async def _handle_set_reminder(self, match: Any) -> Dict[str, Any]:
         """Programa un recordatorio, alarma o temporizador."""
-        phrase = match.group(1).strip()
-        text, when_str = _split_reminder_text_and_time(phrase)
+        if isinstance(match, dict):
+            text = match.get("text", "")
+            when_str = match.get("when_str", "")
+        else:
+            phrase = match.group(1).strip()
+            text, when_str = _split_reminder_text_and_time(phrase)
         
         # Si no hay texto, deducimos el tipo (Temporizador, Alarma, Recordatorio)
-        orig = match.group(0).lower()
         if not text:
+            orig = match.get("orig", "") if isinstance(match, dict) else match.group(0).lower()
             if "timer" in orig or "temporizador" in orig:
                 text = "Temporizador"
             elif "alarma" in orig:
@@ -1104,7 +1225,7 @@ class Orchestrator:
             "data": {"text": text, "when": res.get("when")} if res["ok"] else {}
         }
 
-    async def _handle_list_reminders(self, match: re.Match) -> Dict[str, Any]:
+    async def _handle_list_reminders(self, match: Any) -> Dict[str, Any]:
         """Lista los próximos recordatorios, alarmas y temporizadores."""
         from datetime import datetime
         upcoming = self.reminders.list_upcoming(limit=5)
@@ -1151,7 +1272,7 @@ class Orchestrator:
             "data": {"reminders": upcoming}
         }
 
-    async def _handle_cancel_reminder(self, match: re.Match) -> Dict[str, Any]:
+    async def _handle_cancel_reminder(self, match: Any) -> Dict[str, Any]:
         """Cancela el recordatorio, alarma o temporizador más cercano."""
         res = self.reminders.cancel_last()
         return {
@@ -1163,11 +1284,14 @@ class Orchestrator:
 
     # ── Utilidades ────────────────────────────────────────────────────────────
 
-    async def _handle_chat_ai(self, match: re.Match) -> Dict[str, Any]:
+    async def _handle_chat_ai(self, match: Any) -> Dict[str, Any]:
         """
         Intención de fallback: Usa Google Gemini para responder de forma conversacional.
         """
-        query = match.group(1).strip()
+        if isinstance(match, dict):
+            query = match.get("query", "")
+        else:
+            query = match.group(1).strip()
         api_key = os.getenv("GEMINI_API_KEY")
         
         if not api_key:
