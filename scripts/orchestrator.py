@@ -532,7 +532,7 @@ class Orchestrator:
         Match grupos:
           group(1) → hint del dispositivo, opcional (ej. "MSI")
         """
-        device_hint = match.group(1).strip() if match.lastindex >= 1 and match.group(1) else None
+        device_hint = match.group(1).strip() if match.group(1) else None
         device_id   = self._resolve_device(device_hint)
 
         if not device_id:
@@ -563,7 +563,7 @@ class Orchestrator:
         Usa media keys del sistema operativo.
         """
         full_text   = match.group(0).lower().strip()
-        device_hint = match.group(1).strip() if match.lastindex >= 1 and match.group(1) else None
+        device_hint = match.group(1).strip() if match.group(1) else None
         device_id   = self._resolve_device(device_hint)
 
         if not device_id:
