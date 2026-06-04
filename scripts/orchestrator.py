@@ -127,13 +127,190 @@ INTENT_PATTERNS: list[Tuple[str, re.Pattern]] = [
 ]
 
 
-# Respuestas de fallback aleatorias para cuando no se entiende el comando
+import random
+
+# ══════════════════════════════════════════════════════
+#  BANCO DE RESPUESTAS ORGÁNICAS
+#  Variedad de frases para que Nika no suene robótica.
+#  Uso: _pick(RESPONSES["open_app"]["ok"], app="Spotify")
+# ══════════════════════════════════════════════════════
+
+def _pick(phrases: list, **kwargs) -> str:
+    """Elige una frase al azar del listado y la formatea con kwargs."""
+    return random.choice(phrases).format(**kwargs)
+
+
+def _safe_group(match: re.Match, n: int, default: str = "") -> str:
+    """
+    Accede a match.group(n) de forma segura.
+    Retorna 'default' si el grupo no existe o es None.
+    Evita IndexError cuando el match viene de la capa semántica
+    (que genera matches con menos grupos que los handlers esperan).
+    """
+    try:
+        val = match.group(n)
+        return val.strip() if val else default
+    except (IndexError, AttributeError):
+        return default
+
+RESPONSES = {
+    "open_app": {
+        "ok": [
+            "Listo, abriendo {app}.",
+            "Abriendo {app} ahora mismo.",
+            "Ya te abro {app}.",
+            "{app} en camino.",
+            "De acuerdo, iniciando {app}.",
+        ],
+        "fail": [
+            "No pude abrir {app}. Verifica que esté instalado.",
+            "Hubo un problema al abrir {app}.",
+            "No encontré {app} en la lista de apps.",
+            "Fallo al intentar abrir {app}.",
+        ],
+        "no_device": [
+            "No hay dispositivos disponibles para abrir {app}. ¿Di 'escanea la red' primero?",
+            "No encontré ningún dispositivo conectado. Intenta escanear la red.",
+        ],
+    },
+    "close_app": {
+        "ok": [
+            "Cerrando {app}.",
+            "Listo, cerrando {app}.",
+            "Apagando {app} ahora.",
+            "{app} cerrada.",
+            "De acuerdo, cerrando {app}.",
+        ],
+        "fail": [
+            "No pude cerrar {app}. Puede que ya esté cerrada.",
+            "Tuve un problema cerrando {app}.",
+            "No logré cerrar {app}.",
+        ],
+        "no_device": [
+            "No hay dispositivos conectados para cerrar {app}.",
+            "No encontré ningún dispositivo activo.",
+        ],
+    },
+    "play_music": {
+        "ok_query": [
+            "Reproduciendo {query}.",
+            "Poniendo {query} ahora.",
+            "Dale, aquí va {query}.",
+            "Buscando y reproduciendo {query}.",
+            "Listo, poniendo {query}.",
+        ],
+        "ok_noquery": [
+            "Reproduciendo música.",
+            "Aquí va la música.",
+            "Listo, dale play.",
+            "Música en camino.",
+        ],
+        "fail": [
+            "No pude conectar con el dispositivo para reproducir.",
+            "Hubo un problema al intentar reproducir música.",
+            "Fallo al conectar con Spotify.",
+        ],
+    },
+    "media_control": {
+        "pause": [
+            "Pausado.",
+            "Música en pausa.",
+            "Listo, pausé la música.",
+            "Pausa activada.",
+        ],
+        "play": [
+            "Continuando.",
+            "Reanudando la música.",
+            "Aquí vamos de nuevo.",
+            "Play.",
+        ],
+        "next": [
+            "Siguiente canción.",
+            "Saltando a la siguiente.",
+            "Cambiando de canción.",
+            "Siguiente.",
+        ],
+        "prev": [
+            "Canción anterior.",
+            "Regresando a la anterior.",
+            "Volviendo atrás.",
+        ],
+        "volume_up": [
+            "Subiendo el volumen.",
+            "Más volumen.",
+            "Subiendo.",
+        ],
+        "volume_down": [
+            "Bajando el volumen.",
+            "Menos volumen.",
+            "Bajando.",
+        ],
+        "toggle": [
+            "Alternando reproducción.",
+            "Play, pause.",
+        ],
+        "fail": [
+            "No pude controlar la reproducción.",
+            "Hubo un error con el control multimedia.",
+        ],
+    },
+    "web_search": {
+        "ok": [
+            "Buscando {query} ahora.",
+            "Dale, busco {query}.",
+            "Abriendo Google con {query}.",
+            "Aquí va tu búsqueda de {query}.",
+        ],
+        "fail": [
+            "No pude abrir el navegador.",
+            "Tuve un problema al buscar {query}.",
+        ],
+        "no_query": [
+            "¿Qué quieres que busque?",
+            "Dime qué busco.",
+        ],
+    },
+    "send_email": {
+        "ok": [
+            "Abriendo tu cliente de correo.",
+            "Listo, abriendo el correo para {recipient}.",
+            "Aquí va el borrador.",
+            "Abriendo correo para redactar.",
+        ],
+        "fail": [
+            "No pude abrir el cliente de correo.",
+            "Hubo un error al abrir el correo.",
+        ],
+    },
+    "system_status": {
+        "ok": [
+            "Todo funcionando bien. Estoy activa y lista.",
+            "Sistema nominal. Aquí estoy.",
+            "Sin problemas. Todo en orden.",
+            "Operativa al cien por ciento.",
+        ],
+    },
+    "shutdown": {
+        "ok": [
+            "Apagando el equipo en {delay} segundos.",
+            "Iniciando apagado en {delay} segundos.",
+        ],
+        "fail": [
+            "No pude apagar el dispositivo.",
+        ],
+    },
+}
+
+# Frases de fallback cuando NO se entiende el comando en absoluto
 FALLBACK_RESPONSES = [
-    "No entendí eso. Puedes decir: 'abre una app', 'modo trabajo', o 'escanea dispositivos'.",
-    "¿Puedes repetirlo? No capturé el comando correctamente.",
-    "No reconocí ese comando. Intenta con: 'abre [app]' o 'modo [nombre]'.",
+    "No entendí eso. Prueba: 'abre una app', 'reproduce música', o 'busca algo'.",
+    "¿Puedes repetirlo? No capturé bien el comando.",
+    "No reconocí ese comando. Di 'modo trabajo' o 'abre chrome' por ejemplo.",
+    "Hmm, no estoy segura de lo que pediste. Intenta de nuevo.",
+    "No te entendí. Prueba con un comando más simple.",
 ]
 _fallback_idx = 0
+
 
 
 class Orchestrator:
@@ -315,14 +492,14 @@ class Orchestrator:
                         f"[Orchestrator] ⚡ Semántica salvó '{intent_name}': "
                         f"token='{token}' en texto='{normalized}'"
                     )
-                    # Crear un match artificial con el texto completo en group(1)
-                    dummy_pattern = re.compile(r"^(.*)$", re.IGNORECASE)
+                    # dummy_match con 2 grupos: group(1)=query/nombre, group(2)=None (sin device)
+                    dummy_pattern = re.compile(r"^(.*?)()$", re.IGNORECASE)
                     dummy_match = dummy_pattern.match(normalized)
                     return intent_name, dummy_match
 
         # ── FALLBACK a chat_ai ─────────────────────────────────────────────────
         logger.warning(f"[Orchestrator] Sin intent estructurado → chat_ai: '{text}'")
-        chat_pattern = re.compile(r"^(.*)$", re.IGNORECASE)
+        chat_pattern = re.compile(r"^(.*?)()$", re.IGNORECASE)
         chat_match = chat_pattern.match(normalized)
         return "chat_ai", chat_match
 
@@ -340,12 +517,15 @@ class Orchestrator:
           group(1) → nombre de la app (ej. "spotify")
           group(2) → hint del dispositivo, opcional (ej. "laptop-01")
         """
-        app_name    = match.group(1).strip()
-        device_hint = match.group(2).strip() if match.lastindex >= 2 and match.group(2) else None
+        app_name    = _safe_group(match, 1)
+        device_hint = _safe_group(match, 2) or None
 
-        # Fix phonetic issues for apps
+        # Limpiar artículos del nombre capturado (ej. "el chrome" → "chrome")
+        app_name = re.sub(r'^(?:el|la|los|las|un|una|lo)\s+', '', app_name, flags=re.IGNORECASE).strip()
+
+        # Fix fonético de apps comunes
         app_name_lower = app_name.lower()
-        if app_name_lower == "crohn" or app_name_lower == "crome":
+        if app_name_lower in ("crohn", "crome", "cron", "krome"):
             app_name = "chrome"
             
         device_id = self._resolve_device(device_hint)
@@ -354,8 +534,7 @@ class Orchestrator:
             return {
                 "success":  False,
                 "action":   "open_app",
-                "response": f"No hay dispositivos conectados para abrir {app_name}. "
-                            f"Di 'escanea la red' primero.",
+                "response": _pick(RESPONSES["open_app"]["no_device"], app=app_name),
                 "data": {"app": app_name},
             }
 
@@ -369,22 +548,26 @@ class Orchestrator:
         return {
             "success":  success,
             "action":   "open_app",
-            "response": f"Abriendo {app_name} en {device_id}." if success
-                        else f"No pude conectar con {device_id}. Verifica que esté en línea.",
+            "response": _pick(RESPONSES["open_app"]["ok"], app=app_name) if success
+                        else _pick(RESPONSES["open_app"]["fail"], app=app_name),
             "data": {"app": app_name, "device": device_id},
         }
 
     async def _handle_close_app(self, match: re.Match) -> Dict[str, Any]:
         """Cierra una aplicación en el dispositivo indicado."""
-        app_name    = match.group(1).strip()
-        device_hint = match.group(2).strip() if match.lastindex >= 2 and match.group(2) else None
+        app_name    = _safe_group(match, 1)
+        device_hint = _safe_group(match, 2) or None
         device_id   = self._resolve_device(device_hint)
+
+        # Limpiar artículos del nombre (ej. "la sierra bloc de notas" → "bloc de notas")
+        app_name = re.sub(r'^(?:el|la|los|las|un|una|lo)\s+(?:sierra|cierra\s+)?', '', app_name, flags=re.IGNORECASE).strip()
+        app_name = re.sub(r'^(?:el|la|los|las|un|una|lo)\s+', '', app_name, flags=re.IGNORECASE).strip()
 
         if not device_id:
             return {
                 "success":  False,
                 "action":   "close_app",
-                "response": f"No hay dispositivos conectados para cerrar {app_name}.",
+                "response": _pick(RESPONSES["close_app"]["no_device"], app=app_name),
                 "data":     {},
             }
 
@@ -394,8 +577,8 @@ class Orchestrator:
         return {
             "success":  success,
             "action":   "close_app",
-            "response": f"Cerrando {app_name} en {device_id}." if success
-                        else "Error de conexión.",
+            "response": _pick(RESPONSES["close_app"]["ok"], app=app_name) if success
+                        else _pick(RESPONSES["close_app"]["fail"], app=app_name),
             "data": {"app": app_name, "device": device_id},
         }
 
@@ -408,8 +591,8 @@ class Orchestrator:
           "abre modo estudio"       → usa el device_id de cada app
           "abre modo estudio en MSI" → manda TODAS las apps a MSI
         """
-        mode_name   = match.group(1).strip()
-        device_hint = match.group(2).strip() if match.lastindex >= 2 and match.group(2) else None
+        mode_name   = _safe_group(match, 1)
+        device_hint = _safe_group(match, 2) or None
 
         logger.info(f"[Orchestrator] Activando modo: '{mode_name}'"
                      + (f" en dispositivo hint='{device_hint}'" if device_hint else ""))
@@ -505,7 +688,7 @@ class Orchestrator:
             return {
                 "success":  False,
                 "action":   "shutdown_device",
-                "response": f"No encontré el dispositivo '{device_hint}'.",
+                "response": _pick(RESPONSES["shutdown"]["fail"]),
                 "data":     {},
             }
 
@@ -515,8 +698,8 @@ class Orchestrator:
         return {
             "success":  success,
             "action":   "shutdown_device",
-            "response": f"Enviando comando de apagado a {device_id}." if success
-                        else "No pude conectar con el dispositivo.",
+            "response": _pick(RESPONSES["shutdown"]["ok"], delay=30) if success
+                        else _pick(RESPONSES["shutdown"]["fail"]),
             "data": {"device": device_id},
         }
 
@@ -550,7 +733,7 @@ class Orchestrator:
         mqtt_status = "conectada" if (self.mqtt and self.mqtt.connected) else "desconectada"
 
         if online_count == 0:
-            response = f"Estoy en línea. La red MQTT está {mqtt_status} y no hay dispositivos conectados."
+            response = _pick(RESPONSES["system_status"]["ok"])
         elif online_count == 1:
             response = f"Todo en orden. Tengo {device_names[0]} conectado."
         else:
@@ -651,7 +834,13 @@ class Orchestrator:
           group(1) → query a buscar (ej. "taylor swift")
           group(2) → hint del dispositivo, opcional (ej. "MSI")
         """
-        query       = match.group(1).strip() if match.group(1) else ""
+        query       = _safe_group(match, 1)
+
+        # query contiene todo lo que match capturó — limpiar prefijos que el regex pudo
+        # dejar si viene de la capa semántica (ej. "me reproduce billie eilish")
+        query = re.sub(r'^(?:me\s+)?(?:reproduce|pon|toca|lanza|coloca|escucha)\s+', '', query, flags=re.IGNORECASE)
+        query = re.sub(r'^(?:la\s+|una\s+|un\s+)?(?:m[uú]sica|canci[oó]n|pista|rola)\s+de\s+', '', query, flags=re.IGNORECASE)
+        query = query.strip()
         
         # ── Corrección Fonética (Spanglish) ───────────────────────────────────
         # El modelo Vosk en español fuerza las palabras en inglés a sonar como español.
@@ -683,14 +872,14 @@ class Orchestrator:
         elif any(w in full_match for w in ("artista", "grupo", "banda")):
             search_type = "artist"
             
-        device_hint = match.group(2).strip() if match.group(2) else None
+        device_hint = _safe_group(match, 2) or None
         device_id   = self._resolve_device(device_hint)
 
         if not device_id:
             return {
                 "success":  False,
                 "action":   "play_music",
-                "response": "No hay dispositivos conectados para reproducir música.",
+                "response": _pick(RESPONSES["play_music"]["fail"]),
                 "data":     {},
             }
 
@@ -701,31 +890,33 @@ class Orchestrator:
         }
 
         success = self.mqtt.publish_command(device_id, command) if self.mqtt else False
-        
-        if query:
-            response_text = f"Reproduciendo {query}"
+
+        if success:
+            response_text = _pick(RESPONSES["play_music"]["ok_query"], query=query) if query \
+                            else _pick(RESPONSES["play_music"]["ok_noquery"])
         else:
-            response_text = "Reproduciendo música"
+            response_text = _pick(RESPONSES["play_music"]["fail"])
 
         return {
             "success":  success,
             "action":   "play_music",
-            "response": f"{response_text} en {device_id}." if success
-                        else f"No pude conectar con {device_id}.",
+            "response": response_text,
             "data": {"device": device_id, "service": "spotify", "query": query},
         }
 
     async def _handle_web_search(self, match: re.Match) -> Dict[str, Any]:
         """Realiza una búsqueda en Google en el dispositivo."""
-        query       = match.group(1).strip() if match.group(1) else ""
-        device_hint = match.group(2).strip() if match.group(2) else None
+        query       = _safe_group(match, 1)
+        # Limpiar prefijos de búsqueda si viene de la capa semántica
+        query = re.sub(r'^(?:me\s+)?(?:busca|buscar|investiga|googlea)\s+', '', query, flags=re.IGNORECASE).strip()
+        device_hint = _safe_group(match, 2) or None
         device_id   = self._resolve_device(device_hint)
 
         if not query:
             return {
                 "success":  False,
                 "action":   "web_search",
-                "response": "¿Qué quieres que busque?",
+                "response": _pick(RESPONSES["web_search"]["no_query"]),
                 "data":     {},
             }
 
@@ -733,7 +924,7 @@ class Orchestrator:
             return {
                 "success":  False,
                 "action":   "web_search",
-                "response": "No hay dispositivos conectados para buscar.",
+                "response": _pick(RESPONSES["web_search"]["fail"], query=query),
                 "data":     {},
             }
 
@@ -743,28 +934,29 @@ class Orchestrator:
         return {
             "success":  success,
             "action":   "web_search",
-            "response": f"Buscando {query} en {device_id}." if success
-                        else f"No pude conectar con {device_id}.",
+            "response": _pick(RESPONSES["web_search"]["ok"], query=query) if success
+                        else _pick(RESPONSES["web_search"]["fail"], query=query),
             "data": {"query": query, "device": device_id},
         }
 
     async def _handle_send_email(self, match: re.Match) -> Dict[str, Any]:
         """Abre el cliente de correo predeterminado para redactar un email."""
-        recipient = match.group(1).strip() if match.group(1) else ""
-        subject = match.group(2).strip() if match.group(2) else ""
+        recipient = _safe_group(match, 1)
+        subject   = _safe_group(match, 2)
         device_id = self._resolve_device(None)
-        
+
         command = {"action": "send_email", "to": recipient, "subject": subject}
         success = self.mqtt.publish_command(device_id, command) if self.mqtt else False
-        
-        tts = "Abriendo el cliente de correo"
-        if recipient:
-            tts += f" para {recipient}"
-            
+
+        if success:
+            resp = _pick(RESPONSES["send_email"]["ok"], recipient=recipient or "nadie")
+        else:
+            resp = _pick(RESPONSES["send_email"]["fail"])
+
         return {
             "success": success,
-            "action": "send_email",
-            "response": f"{tts} en {device_id}." if success else "No hay dispositivos conectados.",
+            "action":  "send_email",
+            "response": resp,
             "data": {"to": recipient, "subject": subject}
         }
 
