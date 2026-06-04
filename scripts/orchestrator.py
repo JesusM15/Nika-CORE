@@ -20,7 +20,7 @@ Intenciones soportadas:
   - scan_devices:   "qué dispositivos hay" / "escanea la red"
   - system_status:  "cómo estás" / "estado del sistema"
 """
-
+import os
 import re
 import json
 import logging
