@@ -718,11 +718,23 @@ class Orchestrator:
                 f"Usuario: {query}"
             )
             
-            # Usar la nueva API genai
-            response = client.models.generate_content(
-                model='gemini-1.5-flash',
-                contents=prompt,
-            )
+            # Intentar primero con el modelo más nuevo (2.5), luego 1.5, luego pro clásico
+            try:
+                response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=prompt,
+                )
+            except Exception as e:
+                try:
+                    response = client.models.generate_content(
+                        model='gemini-1.5-flash',
+                        contents=prompt,
+                    )
+                except Exception:
+                    response = client.models.generate_content(
+                        model='gemini-pro',
+                        contents=prompt,
+                    )
                 
             text_response = response.text.strip()
             
