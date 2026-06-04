@@ -390,20 +390,39 @@ class WakeWordDetector:
             self.speak("No escuché ningún comando.")
             return
 
-        # Transcribir el buffer completo
-        cmd_rec = self._new_recognizer()
-        for chunk in self._command_buffer:
-            cmd_rec.AcceptWaveform(chunk)
-
-        result = json.loads(cmd_rec.FinalResult())
-        text   = result.get("text", "").strip()
+        # ── Transcripción Híbrida ───────────────────────────────────────────
+        # Intenta usar la API gratuita de Google para el comando (perfecta en Spanglish)
+        # Si falla o no hay internet, usa el modelo local Vosk.
+        raw_audio = b"".join(self._command_buffer)
+        text = ""
+        
+        try:
+            import speech_recognition as sr
+            # Convertir buffer raw a objeto AudioData (16kHz, 16-bit = 2 bytes)
+            audio_data = sr.AudioData(raw_audio, SAMPLE_RATE, 2)
+            r = sr.Recognizer()
+            text = r.recognize_google(audio_data, language="es-MX")
+            logger.info(f"[WakeWord] ✓ Comando transcrito (Nube Google): '{text}'")
+            
+        except ImportError:
+            logger.debug("[WakeWord] Librería 'SpeechRecognition' no instalada, usando Vosk local.")
+        except Exception as e:
+            logger.warning(f"[WakeWord] Error en Nube STT ({e}), usando Vosk local...")
+            
+        # Fallback a Vosk Local
+        if not text:
+            cmd_rec = self._new_recognizer()
+            for chunk in self._command_buffer:
+                cmd_rec.AcceptWaveform(chunk)
+            result = json.loads(cmd_rec.FinalResult())
+            text   = result.get("text", "").strip()
+            logger.info(f"[WakeWord] ✓ Comando transcrito (Local Vosk): '{text}'")
 
         if not text:
             logger.warning("[WakeWord] No se reconoció texto en el comando.")
             self.speak("No te escuché bien. Inténtalo de nuevo diciendo mi nombre primero.")
             return
 
-        logger.info(f"[WakeWord] ✓ Comando transcrito: '{text}'")
         self._send_to_api(text)
 
     def _send_to_api(self, text: str):
