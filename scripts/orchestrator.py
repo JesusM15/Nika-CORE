@@ -73,16 +73,16 @@ INTENT_PATTERNS: list[Tuple[str, re.Pattern]] = [
     )),
 
     # ── ABRIR APLICACIÓN ───────────────────────────────────────────────────────
-    # Matches: "abreme spotify", "arranca word", "muestrame el navegador"
+    # Matches: "abreme spotify", "arranca word", "habre el navegador"
     ("open_app", re.compile(
-        r"(?:[aá]bre(?:me)?|inicia|ejecuta|lanza|pon(?:me)?|enciende|arranca|mu[eé]strame)\s+(.+?)(?:\s+en\s+(.+))?$",
+        r"(?:[aá]bre(?:me)?|habre(?:me)?|inicia|ejecuta|lanza|pon(?:me)?|enciende|arranca|mu[eé]strame)\s+(.+?)(?:\s+en\s+(.+))?$",
         re.IGNORECASE,
     )),
 
     # ── CERRAR APLICACIÓN ──────────────────────────────────────────────────────
-    # Matches: "cierrame spotify", "quita chrome", "apaga el juego"
+    # Matches: "cierrame spotify", "sierra chrome", "quita el juego"
     ("close_app", re.compile(
-        r"(?:cierra(?:me)?|det[eé]n|detiene|para|mata|quita|apaga)\s+(.+?)(?:\s+en\s+(.+))?$",
+        r"(?:cierra(?:me)?|sierra(?:me)?|det[eé]n|detiene|para|mata|quita|apaga)\s+(.+?)(?:\s+en\s+(.+))?$",
         re.IGNORECASE,
     )),
 
@@ -117,6 +117,13 @@ INTENT_PATTERNS: list[Tuple[str, re.Pattern]] = [
     ("system_status", re.compile(
         r"(?:c[oó]mo\s+est[aá]s|estado(?:\s+del\s+sistema)?|"
         r"qu[eé]\s+est[aá]s\s+haciendo|informe|status|est[aá]s\s+ah[ií])",
+        re.IGNORECASE,
+    )),
+
+    # ── CONVERSACIÓN IA (FALLBACK) ─────────────────────────────────────────────
+    # Matches: Cualquier cosa que no haya coincidido con los anteriores (chistes, preguntas)
+    ("chat_ai", re.compile(
+        r"^(.*)$",
         re.IGNORECASE,
     )),
 ]
@@ -190,6 +197,7 @@ class Orchestrator:
                 "shutdown_device":self._handle_shutdown_device,
                 "scan_devices":   self._handle_scan_devices,
                 "system_status":  self._handle_system_status,
+                "chat_ai":        self._handle_chat_ai,
             }
             handler = handlers.get(intent)
             if handler:
@@ -681,6 +689,65 @@ class Orchestrator:
         }
 
     # ── Utilidades ────────────────────────────────────────────────────────────
+
+    async def _handle_chat_ai(self, match: re.Match) -> Dict[str, Any]:
+        """
+        Intención de fallback: Usa Google Gemini para responder de forma conversacional.
+        """
+        query = match.group(1).strip()
+        api_key = os.getenv("GEMINI_API_KEY")
+        
+        if not api_key:
+            return {
+                "success": False,
+                "action": "chat_ai",
+                "response": "No tengo configurada mi clave de inteligencia artificial.",
+                "data": {"query": query}
+            }
+            
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+            
+            # Usar el modelo rápido y gratuito
+            model = genai.GenerativeModel(
+                'gemini-1.5-flash', 
+                system_instruction="Eres Nika, un asistente virtual de PC inteligente, amigable y muy conciso. Da respuestas muy breves y directas en español (1 o 2 oraciones máximo) porque vas a ser leída en voz alta por un sintetizador de voz. No uses asteriscos ni markdown."
+            )
+            # Ejecutar de forma síncrona en un hilo para no bloquear el loop asyncio, o simplemente directo
+            response = model.generate_content(query)
+            text_response = response.text.strip()
+            
+            # Limpiar posibles asteriscos residuales de markdown para que espeak no los lea
+            text_response = text_response.replace("*", "").replace("#", "")
+            
+            return {
+                "success": True,
+                "action": "chat_ai",
+                "response": text_response,
+                "data": {"query": query, "response": text_response}
+            }
+            
+        except ImportError:
+            import logging
+            logger = logging.getLogger("nika.orchestrator")
+            logger.error("[Orchestrator] Librería google-generativeai no instalada.")
+            return {
+                "success": False,
+                "action": "chat_ai",
+                "response": "Me falta un módulo interno para poder pensar.",
+                "data": {"query": query}
+            }
+        except Exception as e:
+            import logging
+            logger = logging.getLogger("nika.orchestrator")
+            logger.error(f"[Orchestrator] Error en Gemini API: {e}")
+            return {
+                "success": False,
+                "action": "chat_ai",
+                "response": "Lo siento, tuve un problema conectándome a mi cerebro.",
+                "data": {"query": query, "error": str(e)}
+            }
 
     def get_history(self) -> list:
         """Retorna el historial de comandos procesados (últimos 50)."""
