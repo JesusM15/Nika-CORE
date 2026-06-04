@@ -49,10 +49,11 @@ INTENT_PATTERNS: list[Tuple[str, re.Pattern]] = [
     )),
 
     # ── CONTROL DE MÚSICA (antes de open_app para que "pon música" no abra "música") ─
-    # Matches: "pon música", "reproduce música en MSI", "ponme música"
+    # Matches: "pon música", "reproduce música en MSI", "reproduce taylor swift"
     ("play_music", re.compile(
         r"(?:pon(?:me)?|reproduce|ponme|echa|lanza)\s+"
-        r"(?:la\s+)?m[uú]sica"
+        r"(?:(?:la\s+)?m[uú]sica|la\s+canci[oó]n\s+de|la\s+canci[oó]n|el\s+[aá]lbum|el\s+artista)?\s*"
+        r"(.*?)"
         r"(?:\s+en\s+(.+))?$",
         re.IGNORECASE,
     )),
@@ -99,6 +100,15 @@ INTENT_PATTERNS: list[Tuple[str, re.Pattern]] = [
         r"(?:qu[eé]\s+dispositivos|escanea(?:\s+(?:la\s+)?red)?|"
         r"busca\s+dispositivos|dispositivos\s+disponibles|"
         r"qué\s+hay\s+conectado)",
+        re.IGNORECASE,
+    )),
+
+    # ── BÚSQUEDA WEB ───────────────────────────────────────────────────────────
+    # Matches: "busca en google recetas", "busca recetas en internet"
+    ("web_search", re.compile(
+        r"(?:busca|buscar)\s+(?:en\s+(?:google|internet|la\s+web)\s+)?"
+        r"(.*?)"
+        r"(?:\s+en\s+(.+))?$",
         re.IGNORECASE,
     )),
 
@@ -176,6 +186,7 @@ class Orchestrator:
                 "activate_mode":  self._handle_activate_mode,
                 "play_music":     self._handle_play_music,
                 "media_control":  self._handle_media_control,
+                "web_search":     self._handle_web_search,
                 "shutdown_device":self._handle_shutdown_device,
                 "scan_devices":   self._handle_scan_devices,
                 "system_status":  self._handle_system_status,
@@ -530,9 +541,11 @@ class Orchestrator:
         Si no se indica dispositivo, usa el primero disponible.
 
         Match grupos:
-          group(1) → hint del dispositivo, opcional (ej. "MSI")
+          group(1) → query a buscar (ej. "taylor swift")
+          group(2) → hint del dispositivo, opcional (ej. "MSI")
         """
-        device_hint = match.group(1).strip() if match.group(1) else None
+        query       = match.group(1).strip() if match.group(1) else ""
+        device_hint = match.group(2).strip() if match.group(2) else None
         device_id   = self._resolve_device(device_hint)
 
         if not device_id:
@@ -546,15 +559,55 @@ class Orchestrator:
         command = {
             "action":   "play_music",
             "service":  "spotify",
+            "query":    query,
         }
 
         success = self.mqtt.publish_command(device_id, command) if self.mqtt else False
+        
+        if query:
+            response_text = f"Reproduciendo {query}"
+        else:
+            response_text = "Reproduciendo música"
+
         return {
             "success":  success,
             "action":   "play_music",
-            "response": f"Reproduciendo música en {device_id}." if success
+            "response": f"{response_text} en {device_id}." if success
                         else f"No pude conectar con {device_id}.",
-            "data": {"device": device_id, "service": "spotify"},
+            "data": {"device": device_id, "service": "spotify", "query": query},
+        }
+
+    async def _handle_web_search(self, match: re.Match) -> Dict[str, Any]:
+        """Realiza una búsqueda en Google en el dispositivo."""
+        query       = match.group(1).strip() if match.group(1) else ""
+        device_hint = match.group(2).strip() if match.group(2) else None
+        device_id   = self._resolve_device(device_hint)
+
+        if not query:
+            return {
+                "success":  False,
+                "action":   "web_search",
+                "response": "¿Qué quieres que busque?",
+                "data":     {},
+            }
+
+        if not device_id:
+            return {
+                "success":  False,
+                "action":   "web_search",
+                "response": "No hay dispositivos conectados para buscar.",
+                "data":     {},
+            }
+
+        command = {"action": "web_search", "query": query}
+        success = self.mqtt.publish_command(device_id, command) if self.mqtt else False
+
+        return {
+            "success":  success,
+            "action":   "web_search",
+            "response": f"Buscando {query} en {device_id}." if success
+                        else f"No pude conectar con {device_id}.",
+            "data": {"query": query, "device": device_id},
         }
 
     async def _handle_media_control(self, match: re.Match) -> Dict[str, Any]:

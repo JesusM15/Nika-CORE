@@ -261,6 +261,7 @@ class NikaClient:
             "close_app":     self._close_app,
             "play_music":    self._play_music,
             "media_control": self._media_control,
+            "web_search":    self._web_search,
             "shutdown":      self._handle_shutdown,
             "rescan":        self._handle_rescan,
             "ping":          lambda p: self._publish_status("online"),
@@ -370,41 +371,122 @@ class NikaClient:
     def _play_music(self, payload: dict):
         """
         Abre Spotify y reproduce música.
-
-        Usa el protocolo URI de Spotify para abrir la app directamente.
-        Si Spotify ya está corriendo, el URI navega sin abrir otra instancia.
+        Si las credenciales de Spotipy están en el .env, usa la Web API para
+        buscar y darle play de forma invisible. Si no, usa el protocolo URI
+        como fallback.
         """
         service = payload.get("service", "spotify")
-        logger.info(f"[Client] 🎵 Reproduciendo música via {service}")
+        query   = payload.get("query", "")
+        logger.info(f"[Client] 🎵 Reproduciendo música via {service}. Query: '{query}'")
 
         if service == "spotify":
+            client_id = os.getenv("SPOTIPY_CLIENT_ID")
+            client_secret = os.getenv("SPOTIPY_CLIENT_SECRET")
+            
+            # --- INTENTO 1: Usar Spotify Web API (si hay credenciales) ---
+            if client_id and client_secret:
+                try:
+                    import spotipy
+                    from spotipy.oauth2 import SpotifyOAuth
+                    
+                    sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
+                        client_id=client_id,
+                        client_secret=client_secret,
+                        redirect_uri=os.getenv("SPOTIPY_REDIRECT_URI", "http://localhost:8888/callback"),
+                        scope="user-modify-playback-state user-read-playback-state"
+                    ))
+                    
+                    # Obtener dispositivos activos
+                    devices = sp.devices()
+                    
+                    if not devices.get('devices'):
+                        # Si no hay dispositivos activos, intentamos abrir Spotify localmente primero
+                        logger.info("[Client] No hay dispositivos Spotify activos. Abriendo app...")
+                        subprocess.Popen(["cmd", "/c", "start", "spotify:"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        time.sleep(4)
+                        devices = sp.devices()
+                    
+                    device_id = None
+                    if devices.get('devices'):
+                        # Buscar el dispositivo activo, o tomar el primero
+                        active_devs = [d for d in devices['devices'] if d['is_active']]
+                        device_id = active_devs[0]['id'] if active_devs else devices['devices'][0]['id']
+                    
+                    if device_id:
+                        if query:
+                            # Buscar track, album o artista
+                            results = sp.search(q=query, limit=1, type='track,album,artist')
+                            uri_to_play = None
+                            
+                            if results['tracks']['items']:
+                                uri_to_play = results['tracks']['items'][0]['uri']
+                            elif results['albums']['items']:
+                                uri_to_play = results['albums']['items'][0]['uri']
+                            elif results['artists']['items']:
+                                uri_to_play = results['artists']['items'][0]['uri']
+                                
+                            if uri_to_play:
+                                is_track = 'track' in uri_to_play
+                                sp.start_playback(
+                                    device_id=device_id, 
+                                    uris=[uri_to_play] if is_track else None,
+                                    context_uri=uri_to_play if not is_track else None
+                                )
+                                logger.info(f"[Client] ✓ Spotipy reproduciendo: {uri_to_play}")
+                                self._publish_status("online", event=f"music:spotify:playing")
+                                return
+                            else:
+                                logger.warning(f"[Client] No se encontraron resultados para: {query}")
+                        else:
+                            # Solo darle play a lo que sea que esté pausado
+                            sp.start_playback(device_id=device_id)
+                            logger.info("[Client] ✓ Play enviado a Spotify via API")
+                            return
+                except ImportError:
+                    logger.warning("[Client] spotipy no instalado. (pip install spotipy)")
+                except Exception as e:
+                    logger.error(f"[Client] ✗ Error con Spotipy API: {e}")
+
+            # --- INTENTO 2: Fallback al protocolo URI de Spotify ---
+            logger.info("[Client] Usando fallback URI de Spotify")
             try:
-                # Paso 1: Intentar abrir Spotify via URI protocol
-                # Este comando abre Spotify y (si Premium) reproduce la última sesión
+                import urllib.parse
+                if query:
+                    safe_query = urllib.parse.quote(query)
+                    uri = f"spotify:search:{safe_query}"
+                else:
+                    uri = "spotify:"
+
                 subprocess.Popen(
-                    ["cmd", "/c", "start", "spotify:"],
+                    ["cmd", "/c", "start", uri],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
-                logger.info("[Client] ✓ Spotify abierto via URI protocol")
+                logger.info(f"[Client] ✓ Spotify abierto via URI: {uri}")
 
-                # Paso 2: Esperar a que Spotify arranque y enviar Play
-                time.sleep(3)
-                self._send_media_key("play_pause")
-                logger.info("[Client] ✓ Play enviado a Spotify")
+                if not query:
+                    # Si no hay query, mandamos el media key para darle Play
+                    time.sleep(3)
+                    self._send_media_key("play_pause")
+                    logger.info("[Client] ✓ Play enviado via media key")
 
                 self._publish_status("online", event="music:spotify:playing")
 
             except Exception as e:
-                logger.error(f"[Client] ✗ Error abriendo Spotify: {e}")
-                # Fallback: intentar abrir via la BD de apps
-                app = self.db.resolve("spotify")
-                if app:
-                    launch_app(app)
-                    time.sleep(3)
-                    self._send_media_key("play_pause")
+                logger.error(f"[Client] ✗ Error en fallback de Spotify: {e}")
         else:
             logger.warning(f"[Client] Servicio de música no soportado: {service}")
+
+    def _web_search(self, payload: dict):
+        """Abre Google Chrome (o default browser) buscando el query."""
+        query = payload.get("query", "")
+        logger.info(f"[Client] 🌐 Búsqueda web: '{query}'")
+        if query:
+            import urllib.parse
+            safe_query = urllib.parse.quote(query)
+            url = f"https://www.google.com/search?q={safe_query}"
+            subprocess.Popen(["cmd", "/c", "start", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self._publish_status("online", event="web_search")
 
     def _media_control(self, payload: dict):
         """
