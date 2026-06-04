@@ -456,57 +456,133 @@ class NikaClient:
                             uri_to_play = None
                             is_track = False
                             
-                            # ── Búsqueda Inteligente (Fuzzy matching por artista) ──
-                            # Si el usuario dice "cancionX de artistaY"
-                            match_artist = re.search(r"(.+)\s+(?:de|por|del artista)\s+(.+)", query, re.IGNORECASE)
-                            if match_artist:
-                                song_guess = match_artist.group(1).strip()
-                                artist_guess = match_artist.group(2).strip()
-                                logger.info(f"[Client] Smart Search -> Canción: '{song_guess}', Artista: '{artist_guess}'")
-                                
-                                art_results = sp.search(q=artist_guess, limit=1, type='artist')
-                                if art_results['artists']['items']:
-                                    artist_id = art_results['artists']['items'][0]['id']
-                                    artist_name = art_results['artists']['items'][0]['name']
-                                    logger.info(f"[Client] Encontrado artista: {artist_name}")
-                                    
-                                    # Obtener top tracks y albums
-                                    top_tracks = sp.artist_top_tracks(artist_id)['tracks']
-                                    albums = sp.artist_albums(artist_id, album_type='album,single', limit=20)['items']
-                                    
-                                    candidates = [(t['name'], t['uri'], True) for t in top_tracks]
-                                    candidates += [(a['name'], a['uri'], False) for a in albums]
-                                    
-                                    # Fuzzy match
-                                    best_ratio = 0
-                                    
-                                    for name, uri, is_tr in candidates:
-                                        # Comparamos la transcripción errónea con el nombre real
-                                        ratio = difflib.SequenceMatcher(None, song_guess.lower(), name.lower()).ratio()
-                                        if ratio > best_ratio:
-                                            best_ratio = ratio
-                                            uri_to_play = uri
-                                            is_track = is_tr
-                                            best_match_name = name
-                                            
-                                    if best_ratio > 0.3:
-                                        logger.info(f"[Client] ✓ Fuzzy Match! '{song_guess}' ≈ '{best_match_name}' (Ratio: {best_ratio:.2f})")
-                                    else:
-                                        uri_to_play = None # Fallback a búsqueda normal
+                            # --- BÚSQUEDA INTELIGENTE CON MULTICANDIDATOS ---
+                            clean_query = query.lower().strip()
+                            pref_type = None
                             
-                            # ── Búsqueda Normal (Fallback) ──
-                            if not uri_to_play:
-                                results = sp.search(q=query, limit=1, type='track,album,artist')
-                                if results['tracks']['items']:
-                                    uri_to_play = results['tracks']['items'][0]['uri']
-                                    is_track = True
-                                elif results['albums']['items']:
-                                    uri_to_play = results['albums']['items'][0]['uri']
-                                    is_track = False
-                                elif results['artists']['items']:
-                                    uri_to_play = results['artists']['items'][0]['uri']
-                                    is_track = False
-                                
+                            # Extraer tipo preferido de música
+                            if any(w in clean_query for w in ("album", "disco", "álbum")):
+                                pref_type = "album"
+                                clean_query = re.sub(r'\b(album|disco|álbum)\b', '', clean_query).strip()
+                            elif any(w in clean_query for w in ("artista", "grupo", "banda")):
+                                pref_type = "artist"
+                                clean_query = re.sub(r'\b(artista|grupo|banda)\b', '', clean_query).strip()
+                            elif any(w in clean_query for w in ("cancion", "canción", "pista", "rola", "tema", "sencillo", "single")):
+                                pref_type = "track"
+                                clean_query = re.sub(r'\b(cancion|canción|pista|rola|tema|sencillo|single)\b', '', clean_query).strip()
+                            
+                            # Optimizar query para el motor de Spotify (reemplazar "de" / "por" por espacios)
+                            # Ej: "thriller de michael jackson" -> "thriller michael jackson"
+                            search_q = re.sub(r'\b(?:de|por)\b', ' ', clean_query)
+                            search_q = ' '.join(search_q.split()) # normalizar espacios
+                            
+                            logger.info(f"[Client] Spotify Smart Search: query='{clean_query}', search_q='{search_q}', pref_type={pref_type}")
+                            
+                            # Buscar en Spotify (limit=10 por tipo)
+                            results = sp.search(q=search_q, limit=10, type='track,album,artist')
+                            candidates = []
+                            
+                            # 1. Parsear canciones
+                            if 'tracks' in results and results['tracks']['items']:
+                                for t in results['tracks']['items']:
+                                    name = t['name']
+                                    artist = t['artists'][0]['name'] if t['artists'] else ""
+                                    popularity = t.get('popularity', 0)
+                                    uri = t['uri']
+                                    
+                                    # Similitud contra query original y query limpia
+                                    r_name1 = difflib.SequenceMatcher(None, clean_query, name.lower()).ratio()
+                                    r_name2 = difflib.SequenceMatcher(None, search_q, name.lower()).ratio()
+                                    
+                                    combined = f"{name} {artist}".lower()
+                                    r_comb1 = difflib.SequenceMatcher(None, clean_query, combined).ratio()
+                                    r_comb2 = difflib.SequenceMatcher(None, search_q, combined).ratio()
+                                    
+                                    rev_combined = f"{artist} {name}".lower()
+                                    r_rev1 = difflib.SequenceMatcher(None, clean_query, rev_combined).ratio()
+                                    r_rev2 = difflib.SequenceMatcher(None, search_q, rev_combined).ratio()
+                                    
+                                    best_ratio = max(r_name1, r_name2, r_comb1, r_comb2, r_rev1, r_rev2)
+                                    
+                                    if pref_type == "track":
+                                        best_ratio += 0.20
+                                        
+                                    candidates.append({
+                                        'name': f"{name} - {artist}",
+                                        'uri': uri,
+                                        'type': 'track',
+                                        'ratio': best_ratio,
+                                        'popularity': popularity,
+                                        'score': best_ratio * 0.80 + (popularity / 100.0) * 0.20
+                                    })
+                                    
+                            # 2. Parsear álbumes
+                            if 'albums' in results and results['albums']['items']:
+                                for a in results['albums']['items']:
+                                    name = a['name']
+                                    artist = a['artists'][0]['name'] if a['artists'] else ""
+                                    popularity = 50 # Baseline para álbumes
+                                    uri = a['uri']
+                                    
+                                    r_name1 = difflib.SequenceMatcher(None, clean_query, name.lower()).ratio()
+                                    r_name2 = difflib.SequenceMatcher(None, search_q, name.lower()).ratio()
+                                    
+                                    combined = f"{name} {artist}".lower()
+                                    r_comb1 = difflib.SequenceMatcher(None, clean_query, combined).ratio()
+                                    r_comb2 = difflib.SequenceMatcher(None, search_q, combined).ratio()
+                                    
+                                    best_ratio = max(r_name1, r_name2, r_comb1, r_comb2)
+                                    
+                                    if pref_type == "album":
+                                        best_ratio += 0.20
+                                        
+                                    candidates.append({
+                                        'name': f"Album: {name} - {artist}",
+                                        'uri': uri,
+                                        'type': 'album',
+                                        'ratio': best_ratio,
+                                        'popularity': popularity,
+                                        'score': best_ratio * 0.80 + (popularity / 100.0) * 0.20
+                                    })
+                                    
+                            # 3. Parsear artistas
+                            if 'artists' in results and results['artists']['items']:
+                                for art in results['artists']['items']:
+                                    name = art['name']
+                                    popularity = art.get('popularity', 0)
+                                    uri = art['uri']
+                                    
+                                    r_name1 = difflib.SequenceMatcher(None, clean_query, name.lower()).ratio()
+                                    r_name2 = difflib.SequenceMatcher(None, search_q, name.lower()).ratio()
+                                    best_ratio = max(r_name1, r_name2)
+                                    
+                                    if pref_type == "artist":
+                                        best_ratio += 0.20
+                                        
+                                    candidates.append({
+                                        'name': f"Artist: {name}",
+                                        'uri': uri,
+                                        'type': 'artist',
+                                        'ratio': best_ratio,
+                                        'popularity': popularity,
+                                        'score': best_ratio * 0.80 + (popularity / 100.0) * 0.20
+                                    })
+                                    
+                            # Ordenar candidatos por puntuación descendente
+                            candidates.sort(key=lambda c: c['score'], reverse=True)
+                            
+                            uri_to_play = None
+                            is_track = False
+                            
+                            if candidates:
+                                best = candidates[0]
+                                logger.info(
+                                    f"[Client] Spotify Smart Choice: '{best['name']}' ({best['type']}) "
+                                    f"score={best['score']:.3f} ratio={best['ratio']:.3f} pop={best['popularity']} uri={best['uri']}"
+                                )
+                                uri_to_play = best['uri']
+                                is_track = (best['type'] == 'track')
+                            
                             if uri_to_play:
                                 sp.start_playback(
                                     device_id=device_id, 
@@ -517,7 +593,7 @@ class NikaClient:
                                 self._publish_status("online", event=f"music:spotify:playing")
                                 return
                             else:
-                                logger.warning(f"[Client] No se encontraron resultados para: {query}")
+                                logger.warning(f"[Client] No se encontraron candidatos válidos para: {query}")
                         else:
                             # Solo darle play a lo que sea que esté pausado
                             sp.start_playback(device_id=device_id)

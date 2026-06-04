@@ -518,6 +518,41 @@ class Orchestrator:
 
         return None, None
 
+    async def _call_gemini_api_direct(self, api_key: str, model: str, prompt: str, response_json: bool = False) -> Optional[str]:
+        """
+        Llama a la API REST de Gemini directamente usando requests para evitar dependencias de SDK.
+        """
+        import requests
+        import asyncio
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        headers = {"Content-Type": "application/json"}
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}]
+        }
+        if response_json:
+            payload["generationConfig"] = {"responseMimeType": "application/json"}
+            
+        try:
+            loop = asyncio.get_event_loop()
+            def make_request():
+                return requests.post(url, json=payload, headers=headers, timeout=10.0)
+                
+            response = await loop.run_in_executor(None, make_request)
+            if response.status_code == 200:
+                res_data = response.json()
+                try:
+                    text = res_data["candidates"][0]["content"]["parts"][0]["text"]
+                    return text.strip()
+                except (KeyError, IndexError) as e:
+                    logger.error(f"[Gemini Direct] Estructura de respuesta inválida: {e}")
+                    return None
+            else:
+                logger.error(f"[Gemini Direct] HTTP {response.status_code}: {response.text}")
+                return None
+        except Exception as e:
+            logger.error(f"[Gemini Direct] Error en petición HTTP: {e}")
+            return None
+
     async def _call_gemini_nlu(self, text: str) -> Optional[Tuple[str, dict]]:
         """
         Llama a la API de Gemini para clasificar el texto del comando y extraer entidades.
@@ -528,80 +563,71 @@ class Orchestrator:
             logger.warning("[Orchestrator NLU] GEMINI_API_KEY no configurada.")
             return None
             
+        prompt = f"""
+        Analiza el siguiente comando de voz en español del usuario para un asistente virtual de PC llamado Nika.
+        Identifica la intención (intent) correcta y extrae los parámetros necesarios.
+
+        Intenciones posibles:
+        - "set_reminder": Para poner alarmas, recordatorios, temporizadores (timers).
+          Parámetros:
+            - "text": El texto de lo que se va a recordar (ej: "sacar la basura", "Temporizador", "Alarma"). Si es un timer/temporizador sin texto descriptivo, usa "Temporizador". Si es una alarma, usa "Alarma".
+            - "when_str": La especificación de tiempo (ej: "en 5 minutos", "de 10 segundos", "mañana a las 8").
+        - "list_reminders": Para ver o listar alarmas, recordatorios o timers pendientes.
+        - "cancel_reminder": Para cancelar o borrar alarmas, recordatorios o timers.
+        - "play_music": Para reproducir música, canciones, discos o artistas en Spotify.
+          Parámetros:
+            - "query": El término de búsqueda de música (ej: "taylor swift", "wildest dreams", "pato gallina itowngameplay"). Corrige cualquier error ortográfico o de pronunciación común al español (ej: "pato gallina de town" -> "pato gallina itowngameplay").
+            - "device": Dispositivo donde reproducir (opcional).
+        - "media_control": Para controlar la reproducción (pausa, play, reanuda, siguiente, anterior, subir volumen, bajar volumen).
+          Parámetros:
+            - "control": Uno de: "pause", "play", "next", "prev", "volume_up", "volume_down", "mute".
+            - "device": Dispositivo a controlar (opcional).
+        - "open_app": Para abrir o iniciar una aplicación.
+          Parámetros:
+            - "app_name": Nombre de la aplicación a abrir (ej: "chrome", "spotify").
+            - "device": Dispositivo donde abrir (opcional).
+        - "close_app": Para cerrar o detener una aplicación.
+          Parámetros:
+            - "app_name": Nombre de la aplicación a cerrar.
+            - "device": Dispositivo (opcional).
+        - "activate_mode": Para activar un modo de trabajo, estudio, gaming, etc.
+          Parámetros:
+            - "mode_name": Nombre del modo.
+            - "device": Dispositivo (opcional).
+        - "web_search": Para buscar algo en Google/internet.
+          Parámetros:
+            - "query": Lo que se va a buscar.
+            - "device": Dispositivo (opcional).
+        - "send_email": Para redactar, mandar o escribir un correo/email.
+          Parámetros:
+            - "to": Destinatario (opcional).
+            - "subject": Asunto (opcional).
+        - "shutdown_device": Para apagar la computadora o laptop.
+        - "scan_devices": Para escanear dispositivos de la red.
+        - "system_status": Para preguntar el estado de Nika.
+        - "chat_ai": Conversación general o preguntas generales (ej: "¿quién eres?", "¿cuál es la capital de Francia?").
+
+        Devuelve la respuesta ÚNICAMENTE como un objeto JSON con el siguiente formato:
+        {{
+          "intent": "nombre_del_intent",
+          "parameters": {{ ... }}
+        }}
+
+        Comando del usuario: "{text}"
+        """
+        
         try:
-            from google import genai
-            client = genai.Client(api_key=api_key)
-            
-            prompt = f"""
-            Analiza el siguiente comando de voz en español del usuario para un asistente virtual de PC llamado Nika.
-            Identifica la intención (intent) correcta y extrae los parámetros necesarios.
-
-            Intenciones posibles:
-            - "set_reminder": Para poner alarmas, recordatorios, temporizadores (timers).
-              Parámetros:
-                - "text": El texto de lo que se va a recordar (ej: "sacar la basura", "Temporizador", "Alarma"). Si es un timer/temporizador sin texto descriptivo, usa "Temporizador". Si es una alarma, usa "Alarma".
-                - "when_str": La especificación de tiempo (ej: "en 5 minutos", "de 10 segundos", "mañana a las 8").
-            - "list_reminders": Para ver o listar alarmas, recordatorios o timers pendientes.
-            - "cancel_reminder": Para cancelar o borrar alarmas, recordatorios o timers.
-            - "play_music": Para reproducir música, canciones, discos o artistas en Spotify.
-              Parámetros:
-                - "query": El término de búsqueda de música (ej: "taylor swift", "wildest dreams", "pato gallina itowngameplay"). Corrige cualquier error ortográfico o de pronunciación común al español (ej: "pato gallina de town" -> "pato gallina itowngameplay").
-                - "device": Dispositivo donde reproducir (opcional).
-            - "media_control": Para controlar la reproducción (pausa, play, reanuda, siguiente, anterior, subir volumen, bajar volumen).
-              Parámetros:
-                - "control": Uno de: "pause", "play", "next", "prev", "volume_up", "volume_down", "mute".
-                - "device": Dispositivo a controlar (opcional).
-            - "open_app": Para abrir o iniciar una aplicación.
-              Parámetros:
-                - "app_name": Nombre de la aplicación a abrir (ej: "chrome", "spotify").
-                - "device": Dispositivo donde abrir (opcional).
-            - "close_app": Para cerrar o detener una aplicación.
-              Parámetros:
-                - "app_name": Nombre de la aplicación a cerrar.
-                - "device": Dispositivo (opcional).
-            - "activate_mode": Para activar un modo de trabajo, estudio, gaming, etc.
-              Parámetros:
-                - "mode_name": Nombre del modo.
-                - "device": Dispositivo (opcional).
-            - "web_search": Para buscar algo en Google/internet.
-              Parámetros:
-                - "query": Lo que se va a buscar.
-                - "device": Dispositivo (opcional).
-            - "send_email": Para redactar, mandar o escribir un correo/email.
-              Parámetros:
-                - "to": Destinatario (opcional).
-                - "subject": Asunto (opcional).
-            - "shutdown_device": Para apagar la computadora o laptop.
-            - "scan_devices": Para escanear dispositivos de la red.
-            - "system_status": Para preguntar el estado de Nika.
-            - "chat_ai": Conversación general o preguntas generales (ej: "¿quién eres?", "¿cuál es la capital de Francia?").
-
-            Devuelve la respuesta ÚNICAMENTE como un objeto JSON con el siguiente formato:
-            {{
-              "intent": "nombre_del_intent",
-              "parameters": {{ ... }}
-            }}
-
-            Comando del usuario: "{text}"
-            """
-            
-            # Usar gemini-2.5-flash para máxima velocidad
-            response = client.models.generate_content(
-                model='gemini-2.5-flash',
-                contents=prompt,
-                config={'response_mime_type': 'application/json'}
-            )
-            
-            res_text = response.text.strip()
+            res_text = await self._call_gemini_api_direct(api_key, 'gemini-2.5-flash', prompt, response_json=True)
+            if not res_text:
+                return None
+                
             logger.info(f"[Orchestrator NLU] Gemini response: {res_text}")
-            
             data = json.loads(res_text)
             intent = data.get("intent")
             params = data.get("parameters", {})
             return intent, params
-            
         except Exception as e:
-            logger.error(f"[Orchestrator NLU] Error llamando a Gemini NLU: {e}")
+            logger.error(f"[Orchestrator NLU] Error parseando Gemini NLU: {e}")
             return None
 
     def _extract_intent_semantic(self, text: str) -> Tuple[Optional[str], Any]:
@@ -1302,65 +1328,38 @@ class Orchestrator:
                 "data": {"query": query}
             }
             
-        try:
-            from google import genai
-            
-            client = genai.Client(api_key=api_key)
-            
-            prompt = (
-                "Eres Nika, un asistente virtual de PC inteligente, amigable y muy conciso. "
-                "Da respuestas muy breves y directas en español (1 o 2 oraciones máximo) "
-                "porque vas a ser leída en voz alta por un sintetizador de voz. "
-                "No uses asteriscos ni formato markdown.\n\n"
-                f"Usuario: {query}"
-            )
-            
-            # Intentar primero con el modelo más nuevo (2.5), luego 1.5, luego pro clásico
-            try:
-                response = client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=prompt,
-                )
-            except Exception as e:
-                try:
-                    response = client.models.generate_content(
-                        model='gemini-1.5-flash',
-                        contents=prompt,
-                    )
-                except Exception:
-                    response = client.models.generate_content(
-                        model='gemini-pro',
-                        contents=prompt,
-                    )
+        prompt = (
+            "Eres Nika, un asistente virtual de PC inteligente, amigable y muy conciso. "
+            "Da respuestas muy breves y directas en español (1 o 2 oraciones máximo) "
+            "porque vas a ser leída en voz alta por un sintetizador de voz. "
+            "No uses asteriscos ni formato markdown.\n\n"
+            f"Usuario: {query}"
+        )
+        
+        # Intentar primero con el modelo más nuevo (2.5), luego 1.5, luego pro clásico
+        text_response = None
+        for model in ('gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-pro'):
+            text_response = await self._call_gemini_api_direct(api_key, model, prompt, response_json=False)
+            if text_response:
+                break
                 
-            text_response = response.text.strip()
-            
-            # Limpiar posibles asteriscos residuales de markdown para que espeak no los lea
-            text_response = text_response.replace("*", "").replace("#", "")
-            
-            return {
-                "success": True,
-                "action": "chat_ai",
-                "response": text_response,
-                "data": {"query": query, "response": text_response}
-            }
-            
-        except ImportError:
-            logger.error("[Orchestrator] Librería google-genai no instalada.")
-            return {
-                "success": False,
-                "action": "chat_ai",
-                "response": "Me falta un módulo interno para poder pensar.",
-                "data": {"query": query}
-            }
-        except Exception as e:
-            logger.error(f"[Orchestrator] Error en Gemini API: {e}")
+        if not text_response:
             return {
                 "success": False,
                 "action": "chat_ai",
                 "response": "Lo siento, tuve un problema conectándome a mi cerebro.",
-                "data": {"query": query, "error": str(e)}
+                "data": {"query": query}
             }
+            
+        # Limpiar posibles asteriscos residuales de markdown para que espeak no los lea
+        text_response = text_response.replace("*", "").replace("#", "")
+        
+        return {
+            "success": True,
+            "action": "chat_ai",
+            "response": text_response,
+            "data": {"query": query, "response": text_response}
+        }
 
     def get_history(self) -> list:
         """Retorna el historial de comandos procesados (últimos 50)."""

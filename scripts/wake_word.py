@@ -118,57 +118,127 @@ def _levenshtein(s1: str, s2: str) -> int:
     return prev[-1]
 
 
+import re
+
+def _phonetic_spanish(word: str) -> str:
+    """
+    Normalización fonética básica en español.
+    Remueve acentos, unifica letras homófonas (b/v, s/c/z/x, y/ll/i, c/k/q/g) y simplifica mudas (h).
+    """
+    w = word.lower().strip()
+    # Eliminar acentos
+    w = w.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u").replace("ü", "u")
+    # Eliminar h (muda)
+    w = w.replace("h", "")
+    # ll / y -> i
+    w = w.replace("ll", "i").replace("y", "i")
+    # v -> b
+    w = w.replace("v", "b")
+    # c (antes de e, i) -> s
+    w = re.sub(r'c([ei])', r's\1', w)
+    # z, x -> s
+    w = w.replace("z", "s").replace("x", "s")
+    # c, q -> k
+    w = w.replace("q", "k")
+    w = re.sub(r'c([aou])', r'k\1', w)
+    w = w.replace("c", "k")
+    # g (antes de e, i) -> j
+    w = re.sub(r'g([ei])', r'j\1', w)
+    
+    # Simplificar letras consecutivas repetidas
+    res = []
+    for char in w:
+        if not res or res[-1] != char:
+            res.append(char)
+    return "".join(res)
+
+
 def _contains_wake_word(text: str) -> bool:
     """
-    Detector de wake word multi-capa con algoritmos combinados:
-
-    Capa 1 - Match exacto:      el texto completo está en WAKE_WORDS
-    Capa 2 - Substring:         cualquier wake word está dentro del texto
-    Capa 3 - Raíz fonética:     algún token empieza con nik/nic/kik/etc.
-    Capa 4 - Fuzzy Levenshtein: similitud ≥ umbral contra cada wake word
-              (umbral se reduce a 0.60 si hay saludo al inicio)
+    Detector de wake word multi-capa usando algoritmo de probabilidad por clasificación de tokens:
+    - Normalización fonética en español.
+    - Match exacto y substring (estándar y fonético).
+    - Cálculo de probabilidad por token (Levenshtein fonético) con boosts de contexto y raíz.
     """
     text_clean = text.lower().strip().rstrip(".!?, ")
+    if not text_clean:
+        return False
 
-    # Capa 1 — exacto
+    # Capa 1 — Exacto/Substring simple
     if text_clean in WAKE_WORDS:
         logger.debug(f"[WakeWord] Match exacto: '{text_clean}'")
         return True
 
-    # Capa 2 — substring
     for kw in WAKE_WORDS:
         if kw in text_clean:
             logger.debug(f"[WakeWord] Match substring: '{kw}' en '{text_clean}'")
             return True
 
+    # Capa 2 — Match fonético completo
+    phon_text = " ".join([_phonetic_spanish(w) for w in text_clean.split()])
+    for kw in WAKE_WORDS:
+        phon_kw = " ".join([_phonetic_spanish(w) for w in kw.split()])
+        if phon_kw == phon_text or phon_kw in phon_text:
+            logger.debug(f"[WakeWord] Match fonético (exacto/sub): '{phon_kw}' en '{phon_text}'")
+            return True
+
+    # Capa 3 — Algoritmo de probabilidad por tokens
     tokens = text_clean.split()
-
-    # Capa 3 — raíz fonológica al inicio de algún token
-    for token in tokens:
-        for root in WAKE_WORD_ROOTS:
-            if token.startswith(root):
-                logger.debug(f"[WakeWord] Match por raíz '{root}': token='{token}'")
-                return True
-
-    # Capa 4 — fuzzy Levenshtein por token
-    # Si hay un saludo al inicio, bajamos el umbral (intención más clara)
-    GREETINGS = {"hola", "ola", "oye", "ey", "hey", "buenas", "oiga", "ali"}
-    first = tokens[0] if tokens else ""
-    threshold = 0.60 if first in GREETINGS else WAKE_WORD_FUZZY_THRESHOLD
-
-    for token in tokens:
-        if len(token) < 3:  # ignorar ruido de 1-2 letras
+    GREETINGS = {"hola", "ola", "oye", "ey", "hey", "buenas", "oiga", "despierta", "atencion", "atención"}
+    
+    for i, token in enumerate(tokens):
+        if len(token) < 2:
             continue
+            
+        phon_token = _phonetic_spanish(token)
+        if len(phon_token) < 2:
+            continue
+            
+        # Evaluar contra todas las palabras clave activas
         for kw in WAKE_WORDS:
             for kw_part in kw.split():
-                if len(kw_part) < 3:
+                if len(kw_part) < 2:
                     continue
-                max_len = max(len(token), len(kw_part))
-                sim = 1.0 - _levenshtein(token, kw_part) / max_len
-                if sim >= threshold:
-                    logger.debug(f"[WakeWord] Fuzzy match: '{token}'≈'{kw_part}' (sim={sim:.2f})")
+                phon_kw = _phonetic_spanish(kw_part)
+                if len(phon_kw) < 2:
+                    continue
+                    
+                # Distancia de edición fonética
+                dist = _levenshtein(phon_token, phon_kw)
+                max_len = max(len(phon_token), len(phon_kw))
+                if max_len == 0:
+                    continue
+                    
+                # Probabilidad base
+                prob = 1.0 - dist / max_len
+                
+                # Boost por contexto: saludo previo
+                has_greeting = False
+                if i > 0 and tokens[i-1] in GREETINGS:
+                    prob += 0.20
+                    has_greeting = True
+                    
+                # Boost por raíz fonológica
+                starts_with_root = False
+                for root in WAKE_WORD_ROOTS:
+                    if token.startswith(root) or phon_token.startswith(_phonetic_spanish(root)):
+                        prob += 0.15
+                        starts_with_root = True
+                        break
+                        
+                # Limitar prob a 1.0
+                prob = min(prob, 1.0)
+                
+                # Umbral dinámico: si hay saludo, es más propenso a activar (menor umbral)
+                threshold = 0.65 if has_greeting else WAKE_WORD_FUZZY_THRESHOLD
+                
+                if prob >= threshold:
+                    logger.debug(
+                        f"[WakeWord] Probabilidad superada para token '{token}'≈'{kw_part}' "
+                        f"(prob={prob:.2f}, threshold={threshold:.2f}, greeting={has_greeting}, root={starts_with_root})"
+                    )
                     return True
-
+                    
     return False
 
 
@@ -544,26 +614,9 @@ class WakeWordDetector:
     def _contains_wake_word(text: str) -> bool:
         """
         Verifica si el texto contiene alguna keyword activa.
-        Normaliza el texto antes de comparar para mayor robustez.
-
-        Args:
-            text: Texto transcrito por Vosk (puede ser parcial o final).
-
-        Returns:
-            True si se detectó alguna keyword.
+        Delega a la función global _contains_wake_word que usa el algoritmo de tokens fonéticos.
         """
-        normalized = text.lower().strip()
-
-        # Comparación exacta primero (más eficiente)
-        if normalized in WAKE_WORDS:
-            return True
-
-        # Búsqueda de substring (para casos como "oye nika cómo estás")
-        for word in WAKE_WORDS:
-            if word in normalized:
-                return True
-
-        return False
+        return _contains_wake_word(text)
 
     # ── Limpieza ──────────────────────────────────────────────────────────────
 
