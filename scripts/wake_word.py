@@ -370,37 +370,85 @@ class WakeWordDetector:
                 loop.close()
 
                 if success:
-                    # Reproducir el mp3 con ffplay (sin ventana, en el dispositivo ALSA)
-                    try:
-                        ffplay_proc = subprocess.Popen(
-                            ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet",
-                             "-af", "volume=2.0",
-                             tmp_path],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                        )
+                    # Reproducción multiplataforma
+                    if os.name == "nt":
+                        # Windows nativo con MCI (sin dependencias)
                         try:
-                            ffplay_proc.wait(timeout=15.0)
-                        except subprocess.TimeoutExpired:
-                            ffplay_proc.kill()
-                            logger.warning("[WakeWord TTS] Timeout reproduciendo audio edge-tts.")
-                    except FileNotFoundError:
-                        # ffplay no disponible, intentar mpg123
+                            import ctypes
+                            buf = ctypes.create_unicode_buffer(260)
+                            ctypes.windll.kernel32.GetShortPathNameW(tmp_path, buf, 260)
+                            short_path = buf.value
+                            ctypes.windll.winmm.mciSendStringW(f"open {short_path} type MPEGVideo alias tts_audio", None, 0, 0)
+                            ctypes.windll.winmm.mciSendStringW("play tts_audio wait", None, 0, 0)
+                            ctypes.windll.winmm.mciSendStringW("close tts_audio", None, 0, 0)
+                        except Exception as e:
+                            logger.error(f"[WakeWord TTS] Error reproduciendo con MCI en Windows: {e}")
+                            success = False
+                    else:
+                        # Linux/Raspberry Pi con mpg123 decodificando a aplay (respeta TTS_ALSA_DEVICE)
+                        played = False
                         try:
                             mpg_proc = subprocess.Popen(
-                                ["mpg123", "-q", tmp_path],
+                                ["mpg123", "-w", "-", tmp_path],
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL,
+                            )
+                            aplay_proc = subprocess.Popen(
+                                ["aplay", "-D", TTS_ALSA_DEVICE, "-"],
+                                stdin=mpg_proc.stdout,
                                 stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL,
                             )
+                            if mpg_proc.stdout:
+                                mpg_proc.stdout.close()
                             try:
-                                mpg_proc.wait(timeout=15.0)
+                                aplay_proc.wait(timeout=15.0)
+                                played = True
+                            except subprocess.TimeoutExpired:
+                                aplay_proc.kill()
+                                logger.warning("[WakeWord TTS] Timeout reproduciendo audio edge-tts con aplay.")
+                            try:
+                                mpg_proc.wait(timeout=2.0)
                             except subprocess.TimeoutExpired:
                                 mpg_proc.kill()
                         except FileNotFoundError:
-                            logger.warning("[WakeWord TTS] Ni ffplay ni mpg123 disponibles. Instala uno.")
-                else:
-                    # Fallback a espeak-ng si edge-tts no está instalado
-                    logger.warning("[WakeWord TTS] edge-tts no disponible, usando espeak-ng...")
+                            # Si mpg123 o aplay fallan (no instalados), intentar ffplay directo
+                            try:
+                                ffplay_proc = subprocess.Popen(
+                                    ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet",
+                                     "-af", "volume=2.0",
+                                     tmp_path],
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL,
+                                )
+                                try:
+                                    ffplay_proc.wait(timeout=15.0)
+                                    played = True
+                                except subprocess.TimeoutExpired:
+                                    ffplay_proc.kill()
+                                    logger.warning("[WakeWord TTS] Timeout reproduciendo audio edge-tts con ffplay.")
+                            except FileNotFoundError:
+                                # Último recurso: mpg123 directo sin aplay (dispositivo por defecto)
+                                try:
+                                    mpg_proc = subprocess.Popen(
+                                        ["mpg123", "-q", tmp_path],
+                                        stdout=subprocess.DEVNULL,
+                                        stderr=subprocess.DEVNULL,
+                                    )
+                                    try:
+                                        mpg_proc.wait(timeout=15.0)
+                                        played = True
+                                    except subprocess.TimeoutExpired:
+                                        mpg_proc.kill()
+                                except FileNotFoundError:
+                                    logger.warning("[WakeWord TTS] Ningún reproductor de audio compatible (mpg123+aplay, ffplay) disponible.")
+                        
+                        if not played:
+                            success = False
+
+                if not success:
+                    # Fallback a espeak-ng si edge-tts no está instalado o falló la reproducción del MP3
+                    logger.warning("[WakeWord TTS] Usando fallback a espeak-ng...")
                     try:
                         espeak_proc = subprocess.Popen(
                             ["espeak-ng", "-v", "es+f2",

@@ -364,23 +364,49 @@ class ReminderService:
                 loop.run_until_complete(_generate())
                 loop.close()
 
-                # Intentar reproducir con ffplay o mpg123
+                # Intentar reproducir con mpg123 + aplay (respeta TTS_ALSA_DEVICE)
+                alsa_dev = os.getenv("TTS_ALSA_DEVICE", "plughw:1,0")
+                played = False
                 try:
-                    ffplay_proc = subprocess.Popen(
-                        ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", "-af", "volume=2.0", tmp_path],
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    mpg_proc = subprocess.Popen(
+                        ["mpg123", "-w", "-", tmp_path],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.DEVNULL,
                     )
-                    ffplay_proc.wait(timeout=15.0)
+                    aplay_proc = subprocess.Popen(
+                        ["aplay", "-D", alsa_dev, "-"],
+                        stdin=mpg_proc.stdout,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    if mpg_proc.stdout:
+                        mpg_proc.stdout.close()
+                    aplay_proc.wait(timeout=15.0)
+                    mpg_proc.wait(timeout=2.0)
+                    played = True
                 except FileNotFoundError:
+                    # Fallback a ffplay directo
                     try:
-                        mpg_proc = subprocess.Popen(
-                            ["mpg123", "-q", tmp_path],
+                        ffplay_proc = subprocess.Popen(
+                            ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", "-af", "volume=2.0", tmp_path],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                         )
-                        mpg_proc.wait(timeout=15.0)
+                        ffplay_proc.wait(timeout=15.0)
+                        played = True
                     except FileNotFoundError:
-                        logger.warning("[Reminders TTS] Ni ffplay ni mpg123 disponibles para reproducir el MP3 de edge-tts.")
-                        raise FileNotFoundError
+                        # Fallback a mpg123 directo sin aplay (dispositivo por defecto)
+                        try:
+                            mpg_proc = subprocess.Popen(
+                                ["mpg123", "-q", tmp_path],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                            )
+                            mpg_proc.wait(timeout=15.0)
+                            played = True
+                        except FileNotFoundError:
+                            logger.warning("[Reminders TTS] Ningún reproductor de audio compatible (mpg123+aplay, ffplay) disponible.")
+                
+                if not played:
+                    raise FileNotFoundError
 
                 try:
                     os.unlink(tmp_path)

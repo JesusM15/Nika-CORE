@@ -227,7 +227,6 @@ class NikaClient:
         Responde al ping de descubrimiento de Nika Core.
         Publica en 'nika/discovery/pong/{hostname}' con apps de la BD local.
         """
-        from app_discovery import get_apps_list, get_local_ip
         apps     = get_apps_list()
         response = {
             "hostname":         HOSTNAME,
