@@ -370,6 +370,8 @@ class WakeWordDetector:
                 success = loop.run_until_complete(_generate())
                 loop.close()
 
+                logger.info(f"[WakeWord TTS] Generación de MP3 con edge-tts: {'exitosa' if success else 'fallida'}")
+
                 if success:
                     # Reproducción multiplataforma
                     if os.name == "nt":
@@ -388,6 +390,7 @@ class WakeWordDetector:
                     else:
                         # Linux/Raspberry Pi con mpg123 decodificando a aplay (respeta TTS_ALSA_DEVICE)
                         played = False
+                        logger.info(f"[WakeWord TTS] Intentando reproducir MP3 vía mpg123 decodificando a aplay...")
                         try:
                             mpg_proc = subprocess.Popen(
                                 ["mpg123", "-r", str(HARDWARE_SAMPLE_RATE), "-w", "-", tmp_path],
@@ -411,18 +414,20 @@ class WakeWordDetector:
                                     aplay_proc.kill()
                                     logger.warning("[WakeWord TTS] Timeout reproduciendo audio edge-tts con aplay.")
                                 
-                                if aplay_proc.returncode == 0:
+                                try:
+                                    mpg_proc.wait(timeout=2.0)
+                                except subprocess.TimeoutExpired:
+                                    mpg_proc.kill()
+
+                                logger.info(f"[WakeWord TTS] mpg123 exit code: {mpg_proc.returncode}, aplay exit code: {aplay_proc.returncode}")
+                                
+                                if aplay_proc.returncode == 0 and mpg_proc.returncode == 0:
                                     played = True
                                 else:
                                     err_msg = stderr_data.decode("utf-8", errors="ignore").strip()
-                                    logger.warning(f"[WakeWord TTS] aplay falló (code={aplay_proc.returncode}): {err_msg}")
+                                    logger.warning(f"[WakeWord TTS] Falló reproducción. aplay code={aplay_proc.returncode}, mpg123 code={mpg_proc.returncode}. Error: {err_msg}")
                             except Exception as ex:
                                 logger.warning(f"[WakeWord TTS] Error ejecutando aplay: {ex}")
-                            
-                            try:
-                                mpg_proc.wait(timeout=2.0)
-                            except subprocess.TimeoutExpired:
-                                mpg_proc.kill()
                         except FileNotFoundError:
                             # Si mpg123 o aplay fallan (no instalados), intentar ffplay directo
                             try:
