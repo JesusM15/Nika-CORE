@@ -370,7 +370,7 @@ class ReminderService:
                 hw_rate = os.getenv("HARDWARE_SAMPLE_RATE", "44100")
                 try:
                     mpg_proc = subprocess.Popen(
-                        ["mpg123", "-r", hw_rate, "-w", "-", tmp_path],
+                        ["mpg123", "-w", "-", tmp_path],
                         stdout=subprocess.PIPE,
                         stderr=subprocess.DEVNULL,
                     )

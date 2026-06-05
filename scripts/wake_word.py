@@ -393,7 +393,7 @@ class WakeWordDetector:
                         logger.info(f"[WakeWord TTS] Intentando reproducir MP3 vía mpg123 decodificando a aplay...")
                         try:
                             mpg_proc = subprocess.Popen(
-                                ["mpg123", "-r", str(HARDWARE_SAMPLE_RATE), "-w", "-", tmp_path],
+                                ["mpg123", "-w", "-", tmp_path],
                                 stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL,
                             )
