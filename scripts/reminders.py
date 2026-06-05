@@ -345,14 +345,59 @@ class ReminderService:
             except Exception as e:
                 logger.warning(f"[Reminders] TTS callback falló: {e}")
 
-        # Fallback: espeak-ng directo si estamos en Linux
-        try:
-            subprocess.Popen(
-                ["espeak-ng", "-v", "es", msg],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-        except FileNotFoundError:
-            pass
+        # Fallback: edge-tts con fallback a espeak-ng
+        def _run_linux_speak():
+            try:
+                import edge_tts
+                import asyncio
+                import tempfile
+                import os
+
+                with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_f:
+                    tmp_path = tmp_f.name
+
+                async def _generate():
+                    communicate = edge_tts.Communicate(msg, "es-MX-DaliaNeural")
+                    await communicate.save(tmp_path)
+
+                loop = asyncio.new_event_loop()
+                loop.run_until_complete(_generate())
+                loop.close()
+
+                # Intentar reproducir con ffplay o mpg123
+                try:
+                    ffplay_proc = subprocess.Popen(
+                        ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", "-af", "volume=2.0", tmp_path],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    )
+                    ffplay_proc.wait(timeout=15.0)
+                except FileNotFoundError:
+                    try:
+                        mpg_proc = subprocess.Popen(
+                            ["mpg123", "-q", tmp_path],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                        )
+                        mpg_proc.wait(timeout=15.0)
+                    except FileNotFoundError:
+                        logger.warning("[Reminders TTS] Ni ffplay ni mpg123 disponibles para reproducir el MP3 de edge-tts.")
+                        raise FileNotFoundError
+
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+
+            except Exception as e:
+                logger.warning(f"[Reminders TTS] Error con edge-tts, usando fallback espeak-ng: {e}")
+                try:
+                    subprocess.Popen(
+                        ["espeak-ng", "-v", "es", msg],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    )
+                except FileNotFoundError:
+                    pass
+
+        threading.Thread(target=_run_linux_speak, daemon=True).start()
 
         # Fallback: publicar vía MQTT para que el cliente lo maneje
         if self._mqtt:

@@ -217,8 +217,6 @@ class NikaClient:
             else:
                 logger.debug(f"[Client] Topic no manejado: {topic}")
 
-        except json.JSONDecodeError:
-            logger.warning(f"[Client] Payload no-JSON en {msg.topic}: {msg.payload[:50]!r}")
         except Exception as e:
             logger.error(f"[Client] Error procesando mensaje: {e}", exc_info=True)
 
@@ -229,6 +227,7 @@ class NikaClient:
         Responde al ping de descubrimiento de Nika Core.
         Publica en 'nika/discovery/pong/{hostname}' con apps de la BD local.
         """
+        from app_discovery import get_apps_list, get_local_ip
         apps     = get_apps_list()
         response = {
             "hostname":         HOSTNAME,
@@ -249,7 +248,7 @@ class NikaClient:
     def _handle_reminder_fire(self, payload: dict):
         """
         Maneja el disparo de un recordatorio, alarma o temporizador.
-        Reproduce un sonido de alerta y habla usando el sintetizador nativo de Windows.
+        Reproduce un sonido de alerta y habla usando edge-tts o el sintetizador nativo de Windows.
         """
         text = payload.get("text", "Recordatorio")
         logger.info(f"[Client] 🔔 Recordatorio recibido: '{text}'")
@@ -261,22 +260,60 @@ class NikaClient:
         except Exception as e:
             logger.warning(f"[Client] No se pudo reproducir el sonido: {e}")
 
-        # 2. Sintetizar la voz en Windows usando PowerShell (Speech API nativa)
-        try:
-            if text.lower() in ("timer", "temporizador"):
-                speak_text = "El temporizador ha terminado."
-            elif text.lower() == "alarma":
-                speak_text = "La alarma está sonando."
-            else:
-                speak_text = f"Recordatorio: {text}."
+        # Determinación de texto
+        if text.lower() in ("timer", "temporizador"):
+            speak_text = "El temporizador ha terminado."
+        elif text.lower() == "alarma":
+            speak_text = "La alarma está sonando."
+        else:
+            speak_text = f"Recordatorio: {text}."
 
-            import subprocess
-            # Escapar comillas simples en el texto para PowerShell
-            safe_text = speak_text.replace("'", "''")
-            cmd = f"Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('{safe_text}')"
-            subprocess.Popen(["powershell", "-Command", cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception as e:
-            logger.error(f"[Client] Error al sintetizar voz de recordatorio: {e}")
+        # 2. Sintetizar la voz asíncronamente con edge-tts (Voz Alexa: es-MX-DaliaNeural)
+        def _run_speak():
+            try:
+                import edge_tts
+                import asyncio
+                import tempfile
+
+                # Crear archivo temporal para el audio mp3
+                with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_f:
+                    tmp_path = tmp_f.name
+
+                async def _generate():
+                    communicate = edge_tts.Communicate(speak_text, "es-MX-DaliaNeural")
+                    await communicate.save(tmp_path)
+
+                loop = asyncio.new_event_loop()
+                loop.run_until_complete(_generate())
+                loop.close()
+
+                # Reproducir con MCI (winmm.dll) de manera nativa en Windows
+                buf = ctypes.create_unicode_buffer(260)
+                ctypes.windll.kernel32.GetShortPathNameW(tmp_path, buf, 260)
+                short_path = buf.value
+
+                ctypes.windll.winmm.mciSendStringW(f"open {short_path} type MPEGVideo alias tts_audio", None, 0, 0)
+                ctypes.windll.winmm.mciSendStringW("play tts_audio wait", None, 0, 0)
+                ctypes.windll.winmm.mciSendStringW("close tts_audio", None, 0, 0)
+
+                # Intentar eliminar el archivo temporal
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+
+            except Exception as e:
+                logger.warning(f"[Client] Error con edge-tts, usando fallback de Windows: {e}")
+                # Fallback: Sintetizar la voz en Windows usando PowerShell (Speech API nativa)
+                try:
+                    safe_text = speak_text.replace("'", "''")
+                    cmd = f"Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('{safe_text}')"
+                    subprocess.Popen(["powershell", "-Command", cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception as ex:
+                    logger.error(f"[Client] Error al sintetizar voz en fallback: {ex}")
+
+        # Ejecutar en hilo secundario para evitar bloquear el hilo principal MQTT
+        threading.Thread(target=_run_speak, daemon=True).start()
 
     def _handle_command(self, payload: dict):
         """

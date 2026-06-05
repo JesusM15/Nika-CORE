@@ -4,3 +4,5 @@
 
 paho-mqtt>=2.0.0     # Comunicación MQTT con el broker de la Raspberry Pi
 python-dotenv>=1.0.0 # Carga del .env con MQTT_BROKER, etc.
+edge-tts             # Voz premium con Microsoft Neural TTS
+
