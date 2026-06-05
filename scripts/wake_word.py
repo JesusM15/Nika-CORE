@@ -390,7 +390,7 @@ class WakeWordDetector:
                         played = False
                         try:
                             mpg_proc = subprocess.Popen(
-                                ["mpg123", "-w", "-", tmp_path],
+                                ["mpg123", "-r", str(HARDWARE_SAMPLE_RATE), "-w", "-", tmp_path],
                                 stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL,
                             )

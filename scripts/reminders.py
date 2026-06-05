@@ -367,9 +367,10 @@ class ReminderService:
                 # Intentar reproducir con mpg123 + aplay (respeta TTS_ALSA_DEVICE)
                 alsa_dev = os.getenv("TTS_ALSA_DEVICE", "plughw:1,0")
                 played = False
+                hw_rate = os.getenv("HARDWARE_SAMPLE_RATE", "44100")
                 try:
                     mpg_proc = subprocess.Popen(
-                        ["mpg123", "-w", "-", tmp_path],
+                        ["mpg123", "-r", hw_rate, "-w", "-", tmp_path],
                         stdout=subprocess.PIPE,
                         stderr=subprocess.DEVNULL,
                     )
