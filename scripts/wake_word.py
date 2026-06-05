@@ -319,6 +319,7 @@ class WakeWordDetector:
         self._tts_enabled = os.getenv("TTS_ENABLED", "true").lower() == "true"
 
         logger.info(f"[WakeWord] TTS: {'activado' if self._tts_enabled else 'desactivado'}")
+        logger.info(f"[WakeWord] Dispositivo ALSA para TTS: {TTS_ALSA_DEVICE}")
         logger.info(f"[WakeWord] Keywords activos: {sorted(WAKE_WORDS)}")
 
     # ── Fábrica de reconocedores ──────────────────────────────────────────────
