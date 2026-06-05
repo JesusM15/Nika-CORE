@@ -41,7 +41,7 @@ ROOT_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT_DIR))
 
 from dotenv import load_dotenv
-load_dotenv(dotenv_path=ROOT_DIR / ".env")
+load_dotenv(dotenv_path=ROOT_DIR / ".env", override=True)
 
 import requests
 import pyaudio
