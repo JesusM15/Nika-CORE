@@ -377,13 +377,28 @@ class ReminderService:
                         ["aplay", "-D", alsa_dev, "-"],
                         stdin=mpg_proc.stdout,
                         stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
+                        stderr=subprocess.PIPE,
                     )
                     if mpg_proc.stdout:
                         mpg_proc.stdout.close()
-                    aplay_proc.wait(timeout=15.0)
-                    mpg_proc.wait(timeout=2.0)
-                    played = True
+                    
+                    stderr_data = b""
+                    try:
+                        _, stderr_data = aplay_proc.communicate(timeout=15.0)
+                    except subprocess.TimeoutExpired:
+                        aplay_proc.kill()
+                        logger.warning("[Reminders TTS] Timeout reproduciendo audio edge-tts con aplay.")
+                    
+                    if aplay_proc.returncode == 0:
+                        played = True
+                    else:
+                        err_msg = stderr_data.decode("utf-8", errors="ignore").strip()
+                        logger.warning(f"[Reminders TTS] aplay falló (code={aplay_proc.returncode}): {err_msg}")
+                    
+                    try:
+                        mpg_proc.wait(timeout=2.0)
+                    except subprocess.TimeoutExpired:
+                        mpg_proc.kill()
                 except FileNotFoundError:
                     # Fallback a ffplay directo
                     try:

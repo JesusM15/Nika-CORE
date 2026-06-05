@@ -393,20 +393,31 @@ class WakeWordDetector:
                                 stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL,
                             )
-                            aplay_proc = subprocess.Popen(
-                                ["aplay", "-D", TTS_ALSA_DEVICE, "-"],
-                                stdin=mpg_proc.stdout,
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL,
-                            )
-                            if mpg_proc.stdout:
-                                mpg_proc.stdout.close()
                             try:
-                                aplay_proc.wait(timeout=15.0)
-                                played = True
-                            except subprocess.TimeoutExpired:
-                                aplay_proc.kill()
-                                logger.warning("[WakeWord TTS] Timeout reproduciendo audio edge-tts con aplay.")
+                                aplay_proc = subprocess.Popen(
+                                    ["aplay", "-D", TTS_ALSA_DEVICE, "-"],
+                                    stdin=mpg_proc.stdout,
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.PIPE,
+                                )
+                                if mpg_proc.stdout:
+                                    mpg_proc.stdout.close()
+                                
+                                stderr_data = b""
+                                try:
+                                    _, stderr_data = aplay_proc.communicate(timeout=15.0)
+                                except subprocess.TimeoutExpired:
+                                    aplay_proc.kill()
+                                    logger.warning("[WakeWord TTS] Timeout reproduciendo audio edge-tts con aplay.")
+                                
+                                if aplay_proc.returncode == 0:
+                                    played = True
+                                else:
+                                    err_msg = stderr_data.decode("utf-8", errors="ignore").strip()
+                                    logger.warning(f"[WakeWord TTS] aplay falló (code={aplay_proc.returncode}): {err_msg}")
+                            except Exception as ex:
+                                logger.warning(f"[WakeWord TTS] Error ejecutando aplay: {ex}")
+                            
                             try:
                                 mpg_proc.wait(timeout=2.0)
                             except subprocess.TimeoutExpired:
